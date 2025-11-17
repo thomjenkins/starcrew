@@ -259,9 +259,74 @@ body {
 }
 
 #modeSelect h2 {
-    margin-bottom: 30px;
+    margin-bottom: 20px;
     font-size: 28px;
     color: #66aaff;
+}
+
+#modeSelect h3 {
+    font-size: 20px;
+    color: #66aaff;
+    margin-bottom: 15px;
+    margin-top: 0;
+}
+
+.instructions {
+    margin: 20px 0;
+    padding: 20px;
+    background: rgba(0, 50, 100, 0.3);
+    border-radius: 10px;
+    border: 1px solid rgba(0, 150, 255, 0.3);
+    text-align: left;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.instructions-content {
+    margin-bottom: 15px;
+}
+
+.instructions p {
+    margin: 8px 0;
+    font-size: 14px;
+    color: #ccc;
+    line-height: 1.5;
+}
+
+.instructions strong {
+    color: #66aaff;
+}
+
+.gameplay-tips {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid rgba(0, 150, 255, 0.3);
+}
+
+.gameplay-tips p {
+    margin-bottom: 8px;
+}
+
+.gameplay-tips ul {
+    margin: 8px 0;
+    padding-left: 20px;
+    color: #ccc;
+    font-size: 14px;
+}
+
+.gameplay-tips li {
+    margin: 5px 0;
+    line-height: 1.4;
+}
+
+/* Show desktop instructions by default, hide mobile */
+.mobile-instructions {
+    display: none;
+}
+
+.desktop-instructions {
+    display: block;
 }
 
 .mode-btn {
@@ -589,6 +654,15 @@ body {
         display: block;
     }
     
+    /* Show mobile instructions, hide desktop */
+    .mobile-instructions {
+        display: block;
+    }
+    
+    .desktop-instructions {
+        display: none;
+    }
+    
     /* Make UI elements larger and more touch-friendly */
     #ui {
         font-size: 16px;
@@ -644,6 +718,25 @@ body {
         width: 90vw;
         max-width: 400px;
         padding: 25px;
+    }
+    
+    /* Mobile instructions styling */
+    .instructions {
+        padding: 15px;
+        font-size: 13px;
+    }
+    
+    .instructions p {
+        font-size: 13px;
+        margin: 6px 0;
+    }
+    
+    .instructions h3 {
+        font-size: 18px;
+    }
+    
+    .gameplay-tips ul {
+        font-size: 12px;
     }
     
     #commandModule {
