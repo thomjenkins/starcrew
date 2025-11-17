@@ -239,6 +239,8 @@ let crewAllocation = {
 };
 let isDraggingCrew = null;
 let dragSourceStation = null;
+let touchDragData = null; // Store drag data for touch events
+let touchDragElement = null; // Store the element being dragged
 
 // Cargo Ship Crew System
 let cargoCrewMembers = [];
@@ -2285,6 +2287,10 @@ function updateCommandModuleUI() {
                 crewEl.dataset.station = station;
                 crewEl.dataset.ship = 'player';
                 crewEl.addEventListener('dragstart', (e) => startCrewDrag(e, crew.id, station, 'player'));
+                // Add touch support for mobile
+                crewEl.addEventListener('touchstart', (e) => startCrewTouchDrag(e, crew.id, station, 'player'), { passive: false });
+                crewEl.addEventListener('touchend', handleCrewTouchEnd, { passive: false });
+                crewEl.addEventListener('touchcancel', handleCrewTouchEnd, { passive: false });
                 slots.appendChild(crewEl);
             });
         }
@@ -2309,6 +2315,9 @@ function updateCommandModuleUI() {
             crewEl.dataset.crewId = crew.id;
             crewEl.dataset.ship = 'player';
             crewEl.addEventListener('dragstart', (e) => startCrewDrag(e, crew.id, null, 'player'));
+            // Add touch support for mobile
+            crewEl.addEventListener('touchstart', (e) => startCrewTouchDrag(e, crew.id, null, 'player'), { passive: false });
+            crewEl.addEventListener('touchend', handleCrewTouchEnd, { passive: false });
             pool.appendChild(crewEl);
         });
     }
@@ -2334,6 +2343,9 @@ function updateCommandModuleUI() {
                 crewEl.dataset.station = 'engineering';
                 crewEl.dataset.ship = 'cargo';
                 crewEl.addEventListener('dragstart', (e) => startCrewDrag(e, crew.id, 'engineering', 'cargo'));
+                // Add touch support for mobile
+                crewEl.addEventListener('touchstart', (e) => startCrewTouchDrag(e, crew.id, 'engineering', 'cargo'), { passive: false });
+                crewEl.addEventListener('touchend', handleCrewTouchEnd, { passive: false });
                 cargoEngineeringSlots.appendChild(crewEl);
             });
         }
@@ -2357,6 +2369,9 @@ function updateCommandModuleUI() {
                 crewEl.dataset.station = 'navigation';
                 crewEl.dataset.ship = 'cargo';
                 crewEl.addEventListener('dragstart', (e) => startCrewDrag(e, crew.id, 'navigation', 'cargo'));
+                // Add touch support for mobile
+                crewEl.addEventListener('touchstart', (e) => startCrewTouchDrag(e, crew.id, 'navigation', 'cargo'), { passive: false });
+                crewEl.addEventListener('touchend', handleCrewTouchEnd, { passive: false });
                 cargoNavigationSlots.appendChild(crewEl);
             });
         }
@@ -2374,6 +2389,9 @@ function updateCommandModuleUI() {
                 crewEl.dataset.crewId = crew.id;
                 crewEl.dataset.ship = 'cargo';
                 crewEl.addEventListener('dragstart', (e) => startCrewDrag(e, crew.id, null, 'cargo'));
+                // Add touch support for mobile
+                crewEl.addEventListener('touchstart', (e) => startCrewTouchDrag(e, crew.id, null, 'cargo'), { passive: false });
+                crewEl.addEventListener('touchend', handleCrewTouchEnd, { passive: false });
                 cargoPool.appendChild(crewEl);
             });
         }
@@ -2383,11 +2401,125 @@ function updateCommandModuleUI() {
 function startCrewDrag(e, crewId, station, ship) {
     isDraggingCrew = crewId;
     dragSourceStation = station;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', JSON.stringify({ crewId, station, ship }));
+    if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', JSON.stringify({ crewId, station, ship }));
+    }
     if (e.target) {
         e.target.classList.add('dragging');
     }
+}
+
+// Touch-based drag for mobile
+function startCrewTouchDrag(e, crewId, station, ship) {
+    e.preventDefault();
+    isDraggingCrew = crewId;
+    dragSourceStation = station;
+    touchDragData = { crewId, station, ship };
+    touchDragElement = e.target;
+    if (e.target) {
+        e.target.classList.add('dragging');
+    }
+}
+
+function handleCrewTouchEnd(e) {
+    if (!touchDragData || !touchDragElement) return;
+    
+    e.preventDefault();
+    const touch = e.changedTouches[0];
+    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+    
+    if (!elementBelow) {
+        touchDragElement.classList.remove('dragging');
+        touchDragData = null;
+        touchDragElement = null;
+        isDraggingCrew = null;
+        dragSourceStation = null;
+        return;
+    }
+    
+    // Find the drop zone (station, pool, etc.)
+    let dropTarget = elementBelow;
+    let foundDropZone = false;
+    
+    // Walk up the DOM tree to find a drop zone
+    while (dropTarget && dropTarget !== document.body) {
+        // Check if it's a station
+        if (dropTarget.dataset && dropTarget.dataset.station) {
+            const station = dropTarget.dataset.station;
+            if (station.startsWith('cargo-')) {
+                const cargoStation = station.replace('cargo-', '');
+                if (touchDragData.ship === 'cargo') {
+                    assignCrewToStation(touchDragData.crewId, cargoStation, 'cargo');
+                } else {
+                    transferCrewToCargo(touchDragData.crewId, cargoStation);
+                }
+                foundDropZone = true;
+                break;
+            } else {
+                if (touchDragData.ship === 'player') {
+                    assignCrewToStation(touchDragData.crewId, station, 'player');
+                } else {
+                    transferCrewToPlayer(touchDragData.crewId, station);
+                }
+                foundDropZone = true;
+                break;
+            }
+        }
+        
+        // Check if it's a crew pool
+        if (dropTarget.id === 'crewPool') {
+            if (touchDragData.ship === 'player') {
+                assignCrewToStation(touchDragData.crewId, null, 'player');
+            } else {
+                transferCrewToPlayer(touchDragData.crewId, null);
+            }
+            foundDropZone = true;
+            break;
+        }
+        
+        if (dropTarget.id === 'cargoCrewPool') {
+            if (touchDragData.ship === 'cargo') {
+                assignCrewToStation(touchDragData.crewId, null, 'cargo');
+            } else {
+                transferCrewToCargo(touchDragData.crewId, null);
+            }
+            foundDropZone = true;
+            break;
+        }
+        
+        // Check if it's inside a station element (crew-slots)
+        if (dropTarget.classList && dropTarget.classList.contains('crew-slots')) {
+            const stationEl = dropTarget.closest('[data-station]');
+            if (stationEl) {
+                const station = stationEl.dataset.station;
+                if (station.startsWith('cargo-')) {
+                    const cargoStation = station.replace('cargo-', '');
+                    if (touchDragData.ship === 'cargo') {
+                        assignCrewToStation(touchDragData.crewId, cargoStation, 'cargo');
+                    } else {
+                        transferCrewToCargo(touchDragData.crewId, cargoStation);
+                    }
+                } else {
+                    if (touchDragData.ship === 'player') {
+                        assignCrewToStation(touchDragData.crewId, station, 'player');
+                    } else {
+                        transferCrewToPlayer(touchDragData.crewId, station);
+                    }
+                }
+                foundDropZone = true;
+                break;
+            }
+        }
+        
+        dropTarget = dropTarget.parentElement;
+    }
+    
+    touchDragElement.classList.remove('dragging');
+    touchDragData = null;
+    touchDragElement = null;
+    isDraggingCrew = null;
+    dragSourceStation = null;
 }
 
 function setupCrewDragAndDrop() {

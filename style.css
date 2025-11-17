@@ -668,9 +668,13 @@ body {
         font-size: 16px;
     }
     
+    /* Hide HUD and weapons display on mobile */
     #hud {
-        padding: 12px;
-        max-width: calc(100vw - 100px);
+        display: none;
+    }
+    
+    #weapons {
+        display: none;
     }
     
     .stat {
