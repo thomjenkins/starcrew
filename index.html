@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Star Crew</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="ui">
+            <div id="hud">
+                <div class="stat">
+                    <span>Health: </span>
+                    <div class="bar health-bar">
+                        <div id="healthFill" class="fill"></div>
+                    </div>
+                    <span id="healthText">100/100</span>
+                </div>
+                <div class="stat">
+                    <span>Shields: </span>
+                    <div class="bar shield-bar">
+                        <div id="shieldFill" class="fill"></div>
+                    </div>
+                    <span id="shieldText">50/50</span>
+                </div>
+                <div class="stat">
+                    <span>Score: <span id="score">0</span></span>
+                </div>
+                <div class="stat">
+                    <span>Level: <span id="level">1</span></span>
+                </div>
+                <div class="stat">
+                    <span>Allies: <span id="allies">0</span></span>
+                </div>
+                <div class="stat" id="cargoHealthStat" style="display: none;">
+                    <span>Cargo Health: </span>
+                    <div class="bar health-bar">
+                        <div id="cargoHealthFill" class="fill"></div>
+                    </div>
+                    <span id="cargoHealthText">200/200</span>
+                </div>
+            </div>
+            <div id="weapons">
+                <div class="weapon-info">
+                    <span>Primary: <span id="primaryAmmo">∞</span></span>
+                    <div class="cooldown-bar">
+                        <div id="primaryCooldown" class="cooldown-fill"></div>
+                    </div>
+                </div>
+                <div class="weapon-info">
+                    <span>Missile: <span id="missileAmmo">5</span></span>
+                    <div class="cooldown-bar">
+                        <div id="missileCooldown" class="cooldown-fill"></div>
+                    </div>
+                </div>
+                <div class="weapon-info">
+                    <span>Laser: <span id="laserAmmo">3</span></span>
+                    <div class="cooldown-bar">
+                        <div id="laserCooldown" class="cooldown-fill"></div>
+                    </div>
+                </div>
+                <div class="weapon-info">
+                    <span>Cluster: <span id="clusterAmmo">0</span></span>
+                    <div class="cooldown-bar">
+                        <div id="clusterCooldown" class="cooldown-fill"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Mobile Controls - Only visible on mobile devices -->
+        <div id="mobileControls" class="mobile-controls">
+            <div id="mobileWeapons" class="mobile-weapon-buttons">
+                <button id="mobileMissileBtn" class="mobile-weapon-btn" data-weapon="missile">
+                    <span class="weapon-label">Missile</span>
+                    <span class="weapon-ammo" id="mobileMissileAmmo">5</span>
+                </button>
+                <button id="mobileLaserBtn" class="mobile-weapon-btn" data-weapon="laser">
+                    <span class="weapon-label">Laser</span>
+                    <span class="weapon-ammo" id="mobileLaserAmmo">3</span>
+                </button>
+                <button id="mobileClusterBtn" class="mobile-weapon-btn" data-weapon="cluster">
+                    <span class="weapon-label">Cluster</span>
+                    <span class="weapon-ammo" id="mobileClusterAmmo">0</span>
+                </button>
+            </div>
+            <button id="mobileCommandBtn" class="mobile-command-btn">Command</button>
+        </div>
+        <div id="gameOver" class="hidden">
+            <h2>Game Over</h2>
+            <p>Final Score: <span id="finalScore">0</span></p>
+            <button id="restartBtn">Restart</button>
+        </div>
+        <div id="upgradeMenu" class="hidden">
+            <h3>Upgrade Available!</h3>
+            <div id="upgradeOptions"></div>
+            <button id="closeUpgrade">Close</button>
+        </div>
+        <div id="modeSelect" class="hidden">
+            <h2>Select Game Mode</h2>
+            <button id="normalModeBtn" class="mode-btn">Normal Mode</button>
+            <button id="missionModeBtn" class="mode-btn">Mission Mode</button>
+        </div>
+        <div id="missionComplete" class="hidden">
+            <h2>Mission Complete!</h2>
+            <p>Cargo vessel safely delivered!</p>
+            <p>Score: <span id="missionScore">0</span></p>
+            <button id="missionRestartBtn">Play Again</button>
+        </div>
+        <div id="commandModule" class="hidden">
+            <h2>Command Module</h2>
+            <div id="crewInfo">
+                <p>Total Crew: <span id="totalCrew">5</span></p>
+                <p>Currency: <span id="currency">0</span> credits</p>
+                <button id="recruitCrewBtn" class="recruit-btn">Recruit Crew (50 credits)</button>
+                <button id="buyClusterBtn" class="recruit-btn" style="margin-top: 10px;">Buy Cluster Ammo (1000 credits)</button>
+            </div>
+            <div id="stations">
+                <div class="station" data-station="shields">
+                    <h3>Shields</h3>
+                    <div class="crew-assigned">
+                        <span>Crew: <span id="shieldsCrew">0</span></span>
+                        <div class="crew-slots" id="shieldsSlots"></div>
+                    </div>
+                    <p class="effect">+<span id="shieldsEffect">0</span>% regen rate</p>
+                </div>
+                <div class="station" data-station="engineering">
+                    <h3>Engineering</h3>
+                    <div class="crew-assigned">
+                        <span>Crew: <span id="engineeringCrew">0</span></span>
+                        <div class="crew-slots" id="engineeringSlots"></div>
+                    </div>
+                    <p class="effect">+<span id="engineeringEffect">0</span> HP/sec</p>
+                </div>
+                <div class="station" data-station="weapons">
+                    <h3>Weapons</h3>
+                    <div class="crew-assigned">
+                        <span>Crew: <span id="weaponsCrew">0</span></span>
+                        <div class="crew-slots" id="weaponsSlots"></div>
+                    </div>
+                    <p class="effect">-<span id="weaponsEffect">0</span>% cooldown, +<span id="weaponsDamageEffect">0</span>% damage</p>
+                </div>
+                <div class="station" data-station="navigation">
+                    <h3>Navigation</h3>
+                    <div class="crew-assigned">
+                        <span>Crew: <span id="navigationCrew">0</span></span>
+                        <div class="crew-slots" id="navigationSlots"></div>
+                    </div>
+                    <p class="effect">+<span id="navigationEffect">0</span>% speed</p>
+                </div>
+            </div>
+            <div id="availableCrew">
+                <h3>Available Crew</h3>
+                <div class="crew-pool" id="crewPool"></div>
+            </div>
+            <div id="cargoShipCrew" style="display: none;">
+                <h2 style="margin-top: 30px; margin-bottom: 15px;">Cargo Ship Crew</h2>
+                <div id="cargoStations">
+                    <div class="station" data-station="cargo-engineering">
+                        <h3>Engineering</h3>
+                        <div class="crew-assigned">
+                            <span>Crew: <span id="cargoEngineeringCrew">0</span></span>
+                            <div class="crew-slots" id="cargoEngineeringSlots"></div>
+                        </div>
+                        <p class="effect">+<span id="cargoEngineeringEffect">0</span> HP/sec</p>
+                    </div>
+                    <div class="station" data-station="cargo-navigation">
+                        <h3>Navigation</h3>
+                        <div class="crew-assigned">
+                            <span>Crew: <span id="cargoNavigationCrew">0</span></span>
+                            <div class="crew-slots" id="cargoNavigationSlots"></div>
+                        </div>
+                        <p class="effect">+<span id="cargoNavigationEffect">0</span>% speed</p>
+                    </div>
+                </div>
+                <div id="cargoAvailableCrew">
+                    <h3>Available Cargo Crew</h3>
+                    <div class="crew-pool" id="cargoCrewPool"></div>
+                </div>
+                <div style="margin-top: 15px; padding: 10px; background: rgba(0, 50, 0, 0.3); border-radius: 8px;">
+                    <p style="margin: 5px 0; font-size: 14px; color: #aaa;">Transfer crew from your ship to cargo ship by dragging them here</p>
+                </div>
+            </div>
+            <button id="closeCommandModule">Close (ESC)</button>
+        </div>
+    </div>
+    <script src="game.js"></script>
+</body>
+</html>
+
