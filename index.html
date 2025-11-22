@@ -11,35 +11,40 @@
         <canvas id="gameCanvas"></canvas>
         <div id="ui">
             <div id="hud">
-                <div class="stat">
-                    <span>Health: </span>
-                    <div class="bar health-bar">
-                        <div id="healthFill" class="fill"></div>
+                <div class="hud-header">
+                    <div class="stat score-stat">
+                        <span>Score: <span id="score">0</span></span>
                     </div>
-                    <span id="healthText">100/100</span>
+                    <button id="hudToggle" class="hud-toggle" title="Toggle HUD">▼</button>
                 </div>
-                <div class="stat">
-                    <span>Shields: </span>
-                    <div class="bar shield-bar">
-                        <div id="shieldFill" class="fill"></div>
+                <div id="hudContent" class="hud-content collapsed">
+                    <div class="stat">
+                        <span>Health: </span>
+                        <div class="bar health-bar">
+                            <div id="healthFill" class="fill"></div>
+                        </div>
+                        <span id="healthText">100/100</span>
                     </div>
-                    <span id="shieldText">50/50</span>
-                </div>
-                <div class="stat">
-                    <span>Score: <span id="score">0</span></span>
-                </div>
-                <div class="stat">
-                    <span>Level: <span id="level">1</span></span>
-                </div>
-                <div class="stat">
-                    <span>Allies: <span id="allies">0</span></span>
-                </div>
-                <div class="stat" id="cargoHealthStat" style="display: none;">
-                    <span>Cargo Health: </span>
-                    <div class="bar health-bar">
-                        <div id="cargoHealthFill" class="fill"></div>
+                    <div class="stat">
+                        <span>Shields: </span>
+                        <div class="bar shield-bar">
+                            <div id="shieldFill" class="fill"></div>
+                        </div>
+                        <span id="shieldText">50/50</span>
                     </div>
-                    <span id="cargoHealthText">200/200</span>
+                    <div class="stat">
+                        <span>Level: <span id="level">1</span></span>
+                    </div>
+                    <div class="stat">
+                        <span>Allies: <span id="allies">0</span></span>
+                    </div>
+                    <div class="stat" id="cargoHealthStat" style="display: none;">
+                        <span>Cargo Health: </span>
+                        <div class="bar health-bar">
+                            <div id="cargoHealthFill" class="fill"></div>
+                        </div>
+                        <span id="cargoHealthText">200/200</span>
+                    </div>
                 </div>
             </div>
             <div id="weapons">
@@ -136,12 +141,16 @@
         </div>
         <div id="commandModule" class="hidden">
             <h2>Command Module</h2>
-            <div id="crewInfo">
-                <p>Total Crew: <span id="totalCrew">5</span></p>
-                <p>Currency: <span id="currency">0</span> credits</p>
-                <button id="recruitCrewBtn" class="recruit-btn">Recruit Crew (50 credits)</button>
-                <button id="buyClusterBtn" class="recruit-btn" style="margin-top: 10px;">Buy Cluster Ammo (1000 credits)</button>
+            <div class="command-tabs">
+                <button id="crewTab" class="command-tab active">Crew</button>
+                <button id="storeTab" class="command-tab">Store</button>
             </div>
+            <div id="crewTabContent" class="command-tab-content">
+                <div id="crewInfo">
+                    <p>Total Crew: <span id="totalCrew">5</span></p>
+                    <p>Currency: <span id="currencyCrew">0</span> credits</p>
+                    <button id="recruitCrewBtn" class="recruit-btn">Recruit Crew (50 credits)</button>
+                </div>
             <div id="stations">
                 <div class="station" data-station="shields">
                     <h3>Shields</h3>
@@ -206,6 +215,30 @@
                 </div>
                 <div style="margin-top: 15px; padding: 10px; background: rgba(0, 50, 0, 0.3); border-radius: 8px;">
                     <p style="margin: 5px 0; font-size: 14px; color: #aaa;">Transfer crew from your ship to cargo ship by dragging them here</p>
+                </div>
+            </div>
+            </div>
+            <div id="storeTabContent" class="command-tab-content hidden">
+                <div id="storeInfo">
+                    <p>Currency: <span id="currencyStore">0</span> credits</p>
+                </div>
+                <div id="storeItems">
+                    <div class="store-item">
+                        <h3>Missile Ammo</h3>
+                        <p>Add 2 missiles to your inventory</p>
+                        <button id="buyMissileBtn" class="recruit-btn">Buy Missile Ammo (200 credits)</button>
+                    </div>
+                    <div class="store-item">
+                        <h3>Laser Ammo</h3>
+                        <p>Add 1 laser to your inventory</p>
+                        <button id="buyLaserBtn" class="recruit-btn">Buy Laser Ammo (300 credits)</button>
+                    </div>
+                    <div class="store-item" id="cargoShipStoreItem" style="display: none;">
+                        <h3>Cargo Ship</h3>
+                        <p>Purchase an additional cargo vessel</p>
+                        <p>Cargo Ships: <span id="cargoShipCount">0</span></p>
+                        <button id="buyCargoShipBtn" class="recruit-btn">Buy Cargo Ship (<span id="cargoShipPrice">2000</span> credits)</button>
+                    </div>
                 </div>
             </div>
             <button id="closeCommandModule">Close (ESC)</button>

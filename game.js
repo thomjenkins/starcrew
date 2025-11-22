@@ -44,7 +44,23 @@ let player = {
     maxShields: 50,
     shieldRegen: 0.05,
     weaponLevel: 1,
-    engineGlow: 0
+    engineGlow: 0,
+    rotation: 0, // Rotation angle in radians (0 = pointing up)
+    rotationSpeed: 0.08 // Radians per frame for rotation
+};
+
+// Tractor Beam
+let tractorBeam = {
+    active: false,
+    charge: 100, // Current charge (0-100)
+    maxCharge: 100,
+    maxDuration: 180, // Maximum duration in frames (3 seconds at 60fps)
+    currentDuration: 0,
+    rechargeRate: 0.5, // Charge per frame when recharging
+    drainRate: 0.6, // Charge drained per frame when active
+    range: 200, // Maximum range
+    target: null, // Current target object
+    targetType: null // 'asteroid', 'enemy', etc.
 };
 
 // Weapons
@@ -94,7 +110,9 @@ let particles = [];
 let explosions = [];
 
 // Mission mode objects
-let cargoVessel = null;
+let cargoVessels = []; // Changed to array to support multiple cargo ships
+let cargoShipCount = 0; // Track number of cargo ships purchased
+let cargoShipPrice = 2000; // Base price for cargo ships
 let startPlanet = null;
 let endPlanet = null;
 
@@ -271,6 +289,11 @@ document.addEventListener('keydown', (e) => {
     // Resume audio context on first user interaction
     resumeAudioContext();
     
+    // Tractor beam activation
+    if ((e.key === 't' || e.key === 'T') && gameState.running && !gameState.paused) {
+        activateTractorBeam();
+    }
+    
     // Open/close command module
     if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
         if (gameState.commandModuleOpen) {
@@ -292,6 +315,11 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('keyup', (e) => {
     keys[e.key.toLowerCase()] = false;
+    
+    // Deactivate tractor beam when key is released
+    if (e.key === 't' || e.key === 'T') {
+        deactivateTractorBeam();
+    }
 });
 
 // Also resume on mouse click
@@ -444,6 +472,63 @@ function updatePlayer() {
     
     let wasMoving = false;
     
+    // Rotation logic - depends on tractor beam state
+    // Check if tractor beam is active - if so, lock rotation to face target
+    if (tractorBeam.active && tractorBeam.target) {
+        // Calculate player's front position
+        const frontX = player.x + Math.sin(player.rotation) * (player.height / 2);
+        const frontY = player.y - Math.cos(player.rotation) * (player.height / 2);
+        
+        // Calculate direction to tractor beam target
+        const dx = tractorBeam.target.x - frontX;
+        const dy = tractorBeam.target.y - frontY;
+        const targetAngle = Math.atan2(dx, -dy); // atan2(dx, -dy) because ship points up at rotation 0
+        
+        // Smoothly rotate toward target
+        let angleDiff = targetAngle - player.rotation;
+        // Normalize angle difference to [-PI, PI]
+        while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+        while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+        
+        // Smoothly rotate toward target angle
+        const maxRotationPerFrame = player.rotationSpeed * 2; // Allow faster rotation when tractor beaming
+        if (Math.abs(angleDiff) > maxRotationPerFrame) {
+            player.rotation += Math.sign(angleDiff) * maxRotationPerFrame;
+        } else {
+            player.rotation = targetAngle; // Snap to target when close
+        }
+    } else {
+        // Normal rotation controls when tractor beam is not active
+        // A/D rotation controls work regardless of movement method
+        if (keys['a']) {
+            player.rotation -= player.rotationSpeed;
+        }
+        if (keys['d']) {
+            player.rotation += player.rotationSpeed;
+        }
+        
+        // Mouse/trackpad rotation (only if mouse is active and button is NOT held down)
+        if (mouseActive && mouseX >= 0 && mouseY >= 0 && mouseX <= canvas.width && mouseY <= canvas.height && !mouseButtonDown) {
+            const dx = mouseX - player.x;
+            const dy = mouseY - player.y;
+            const targetAngle = Math.atan2(dx, -dy); // atan2(dx, -dy) because ship points up at rotation 0
+            let angleDiff = targetAngle - player.rotation;
+            
+            // Normalize angle difference to [-PI, PI]
+            while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+            while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+            
+            // Smoothly rotate toward target angle
+            const maxRotationPerFrame = player.rotationSpeed * 2; // Allow faster rotation when following cursor
+            if (Math.abs(angleDiff) > maxRotationPerFrame) {
+                player.rotation += Math.sign(angleDiff) * maxRotationPerFrame;
+            } else {
+                player.rotation = targetAngle; // Snap to target when close
+            }
+        }
+    }
+    
+    // Movement logic - works regardless of tractor beam state
     // Mouse/trackpad control (takes priority if active)
     if (mouseActive && mouseX >= 0 && mouseY >= 0 && mouseX <= canvas.width && mouseY <= canvas.height) {
         const dx = mouseX - player.x;
@@ -452,6 +537,7 @@ function updatePlayer() {
         
         if (distance > 2) { // Only move if cursor is far enough away
             wasMoving = true;
+            
             // Smooth movement towards mouse with speed limit
             const moveDistance = Math.min(distance, effectiveSpeed * 2);
             player.x += (dx / distance) * moveDistance;
@@ -462,14 +548,33 @@ function updatePlayer() {
             player.y = Math.max(player.height / 2, Math.min(canvas.height - player.height / 2, player.y));
         }
     } else {
-        // Keyboard control (fallback or alternative)
-        wasMoving = keys['w'] || keys['arrowup'] || keys['s'] || keys['arrowdown'] || 
-                     keys['a'] || keys['arrowleft'] || keys['d'] || keys['arrowright'];
+        // Keyboard control
+        // WASD: Rotation-based movement (A/D rotate, W/S move forward/backward)
+        // Arrow keys: Direct directional movement (no rotation)
         
-        if (keys['w'] || keys['arrowup']) player.y = Math.max(player.height / 2, player.y - effectiveSpeed);
-        if (keys['s'] || keys['arrowdown']) player.y = Math.min(canvas.height - player.height / 2, player.y + effectiveSpeed);
-        if (keys['a'] || keys['arrowleft']) player.x = Math.max(player.width / 2, player.x - effectiveSpeed);
-        if (keys['d'] || keys['arrowright']) player.x = Math.min(canvas.width - player.width / 2, player.x + effectiveSpeed);
+        // WASD forward/backward movement
+        if (keys['w']) {
+            wasMoving = true;
+            player.x += Math.sin(player.rotation) * effectiveSpeed;
+            player.y -= Math.cos(player.rotation) * effectiveSpeed;
+        }
+        if (keys['s']) {
+            wasMoving = true;
+            player.x -= Math.sin(player.rotation) * effectiveSpeed;
+            player.y += Math.cos(player.rotation) * effectiveSpeed;
+        }
+        
+        // Arrow keys: Direct directional movement (no rotation)
+        wasMoving = wasMoving || keys['arrowup'] || keys['arrowdown'] || keys['arrowleft'] || keys['arrowright'];
+        
+        if (keys['arrowup']) player.y = Math.max(player.height / 2, player.y - effectiveSpeed);
+        if (keys['arrowdown']) player.y = Math.min(canvas.height - player.height / 2, player.y + effectiveSpeed);
+        if (keys['arrowleft']) player.x = Math.max(player.width / 2, player.x - effectiveSpeed);
+        if (keys['arrowright']) player.x = Math.min(canvas.width - player.width / 2, player.x + effectiveSpeed);
+        
+        // Keep player within bounds (for WASD movement)
+        player.x = Math.max(player.width / 2, Math.min(canvas.width - player.width / 2, player.x));
+        player.y = Math.max(player.height / 2, Math.min(canvas.height - player.height / 2, player.y));
     }
 
     // Engine glow effect
@@ -539,13 +644,24 @@ function shoot(weaponType) {
     const damageBonus = 1 + (weaponsCrewCount * crewEffects.weapons.damageBonus);
     damage = damage * damageBonus;
     
+    // Always shoot in the direction the ship is facing (based on rotation)
+    // Ship's pointy end is at the top (rotation 0 = pointing up)
+    // So we fire in the direction of rotation
+    const baseSpeed = weaponType === 'primary' ? 8 : weaponType === 'missile' ? 10 : weaponType === 'laser' ? 15 : 12;
+    const vx = Math.sin(player.rotation) * baseSpeed;
+    const vy = -Math.cos(player.rotation) * baseSpeed;
+    
+    // Spawn bullet at the front of the ship (pointy end, which is at the top when rotation = 0)
+    const bulletX = player.x + Math.sin(player.rotation) * (player.height / 2);
+    const bulletY = player.y - Math.cos(player.rotation) * (player.height / 2);
+    
     if (weaponType === 'primary') {
         sounds.primaryShot();
         bullets.push({
-            x: player.x,
-            y: player.y - player.height / 2,
-            vx: 0,
-            vy: -8,
+            x: bulletX,
+            y: bulletY,
+            vx: vx,
+            vy: vy,
             damage: damage,
             color: weapon.color,
             size: 4,
@@ -555,11 +671,12 @@ function shoot(weaponType) {
         
         // Upgraded primary fires multiple shots
         if (upgrades.primaryDamage.level >= 2) {
+            const spreadAngle = 0.2; // 0.2 radians spread
             bullets.push({
-                x: player.x - 15,
-                y: player.y - player.height / 2,
-                vx: -1,
-                vy: -8,
+                x: bulletX,
+                y: bulletY,
+                vx: Math.sin(player.rotation - spreadAngle) * baseSpeed,
+                vy: -Math.cos(player.rotation - spreadAngle) * baseSpeed,
                 damage: damage * 0.8,
                 color: weapon.color,
                 size: 4,
@@ -567,10 +684,10 @@ function shoot(weaponType) {
                 glow: true
             });
             bullets.push({
-                x: player.x + 15,
-                y: player.y - player.height / 2,
-                vx: 1,
-                vy: -8,
+                x: bulletX,
+                y: bulletY,
+                vx: Math.sin(player.rotation + spreadAngle) * baseSpeed,
+                vy: -Math.cos(player.rotation + spreadAngle) * baseSpeed,
                 damage: damage * 0.8,
                 color: weapon.color,
                 size: 4,
@@ -581,10 +698,10 @@ function shoot(weaponType) {
     } else if (weaponType === 'missile') {
         sounds.missileLaunch();
         bullets.push({
-            x: player.x,
-            y: player.y - player.height / 2,
-            vx: 0,
-            vy: -10,
+            x: bulletX,
+            y: bulletY,
+            vx: vx,
+            vy: vy,
             damage: damage,
             color: weapon.color,
             size: 8,
@@ -596,10 +713,10 @@ function shoot(weaponType) {
     } else if (weaponType === 'laser') {
         sounds.laserShot();
         bullets.push({
-            x: player.x,
-            y: player.y - player.height / 2,
-            vx: 0,
-            vy: -15,
+            x: bulletX,
+            y: bulletY,
+            vx: vx,
+            vy: vy,
             damage: damage,
             color: weapon.color,
             size: 6,
@@ -610,10 +727,10 @@ function shoot(weaponType) {
     } else if (weaponType === 'cluster') {
         sounds.missileLaunch();
         bullets.push({
-            x: player.x,
-            y: player.y - player.height / 2,
-            vx: 0,
-            vy: -12,
+            x: bulletX,
+            y: bulletY,
+            vx: vx,
+            vy: vy,
             damage: damage,
             color: weapon.color,
             size: 10,
@@ -734,25 +851,90 @@ function updateBullets() {
 function spawnEnemy() {
     // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
     const creditDifficulty = cumulativeCredits / 100;
-    const difficulty = creditDifficulty * 0.05; // Slower speed increase
-    const x = Math.random() * canvas.width;
+    const difficulty = creditDifficulty * 0.05;
     const hue = Math.random() * 60;
+    
+    // Spawn from random edge (0=top, 1=right, 2=bottom, 3=left)
+    let edge = Math.floor(Math.random() * 4);
+    let x, y, vx, vy;
+    let attempts = 0;
+    const maxAttempts = 20; // Increased attempts
+    const minDistance = 120; // Increased minimum distance from other enemies
+    
+    // Try to spawn enemy at a position that's not too close to existing enemies
+    do {
+        // Add some randomization to spawn position to avoid exact overlaps
+        const edgeOffset = (Math.random() - 0.5) * 50; // Random offset along edge
+        
+        switch(edge) {
+            case 0: // Top
+                x = Math.max(30, Math.min(canvas.width - 30, Math.random() * canvas.width + edgeOffset));
+                y = -30;
+                vx = (Math.random() - 0.5) * 1;
+                vy = 0.5 + Math.random() * 0.5;
+                break;
+            case 1: // Right
+                x = canvas.width + 30;
+                y = Math.max(30, Math.min(canvas.height - 30, Math.random() * canvas.height + edgeOffset));
+                vx = -(0.5 + Math.random() * 0.5);
+                vy = (Math.random() - 0.5) * 1;
+                break;
+            case 2: // Bottom
+                x = Math.max(30, Math.min(canvas.width - 30, Math.random() * canvas.width + edgeOffset));
+                y = canvas.height + 30;
+                vx = (Math.random() - 0.5) * 1;
+                vy = -(0.5 + Math.random() * 0.5);
+                break;
+            case 3: // Left
+                x = -30;
+                y = Math.max(30, Math.min(canvas.height - 30, Math.random() * canvas.height + edgeOffset));
+                vx = 0.5 + Math.random() * 0.5;
+                vy = (Math.random() - 0.5) * 1;
+                break;
+        }
+        attempts++;
+        
+        // Check if position is too close to existing enemies
+        let tooClose = false;
+        for (let i = 0; i < enemies.length; i++) {
+            const dist = Math.hypot(enemies[i].x - x, enemies[i].y - y);
+            if (dist < minDistance) {
+                tooClose = true;
+                break;
+            }
+        }
+        
+        // If not too close, use this position
+        if (!tooClose) {
+            break;
+        }
+        
+        // Try a different edge if we keep getting too close
+        if (attempts % 5 === 0) {
+            edge = Math.floor(Math.random() * 4);
+        }
+    } while (attempts < maxAttempts);
+    
     enemies.push({
         x: x,
-        y: -30,
+        y: y,
         width: 30 + Math.random() * 20,
         height: 30 + Math.random() * 20,
-        vx: (Math.random() - 0.5) * 2,
-        vy: 0.5 + Math.random() * 1.5 + difficulty, // Start slower
-        health: 30 + creditDifficulty * 8, // More gradual health increase
+        vx: vx,
+        vy: vy,
+        health: 30 + creditDifficulty * 8,
         maxHealth: 30 + creditDifficulty * 8,
         color: `hsl(${hue}, 70%, 50%)`,
         glowColor: `hsl(${hue}, 100%, 60%)`,
-        shootCooldown: Math.max(40, 90 - creditDifficulty * 2), // More gradual shooting speed increase
-        damage: 10 + creditDifficulty * 1.5, // More gradual damage increase
-        rotation: 0,
-        rotationSpeed: (Math.random() - 0.5) * 0.05,
-        lastNebulaDamageTime: 0 // Track nebula damage
+        shootCooldown: Math.max(40, 90 - creditDifficulty * 2),
+        damage: 10 + creditDifficulty * 1.5,
+        rotation: 0, // Will be set based on target direction
+        targetRotation: 0, // Target rotation for smooth interpolation
+        lastNebulaDamageTime: 0,
+        pursuitSpeed: 0.5 + difficulty * 0.3, // Speed for pursuing targets
+        targetType: null, // 'player', 'cargo', or 'ally'
+        targetSwitchCooldown: 0, // Cooldown before switching targets
+        circleDirection: Math.random() < 0.5 ? 1 : -1 // Consistent circling direction (clockwise or counter-clockwise)
     });
 }
 
@@ -1015,31 +1197,206 @@ function drawNebulas() {
 // Update enemies
 function updateEnemies() {
     enemies = enemies.filter(enemy => {
-        enemy.x += enemy.vx;
-        enemy.y += enemy.vy;
-        enemy.rotation += enemy.rotationSpeed;
-        enemy.shootCooldown--;
-
-        // Enemy shooting
-        if (enemy.shootCooldown <= 0 && enemy.y > 0) {
-            enemy.shootCooldown = 60 + Math.random() * 60;
-            sounds.enemyShot();
-            
-            // In mission mode, enemies sometimes target cargo vessel
+        // Decrease target switch cooldown
+        if (enemy.targetSwitchCooldown > 0) {
+            enemy.targetSwitchCooldown--;
+        }
+        
+        // Determine target (player, nearest cargo vessel, or nearest ally)
+        // Only switch targets if cooldown is 0 and we find a better target
             let targetX = player.x;
             let targetY = player.y;
-            
-            if (gameState.gameMode === 'mission' && cargoVessel && Math.random() < 0.4) {
-                targetX = cargoVessel.x;
-                targetY = cargoVessel.y;
+        let newTargetType = 'player';
+        
+        // Check for nearest ally
+        let nearestAlly = null;
+        let nearestAllyDist = Infinity;
+        allies.forEach(ally => {
+            const dist = Math.hypot(ally.x - enemy.x, ally.y - enemy.y);
+            if (dist < nearestAllyDist) {
+                nearestAllyDist = dist;
+                nearestAlly = ally;
             }
-            
+        });
+        
+        // Check for nearest cargo vessel
+        let nearestCargo = null;
+        let nearestCargoDist = Infinity;
+        if (gameState.gameMode === 'mission' && cargoVessel) {
+            const dist = Math.hypot(cargoVessel.x - enemy.x, cargoVessel.y - enemy.y);
+            if (dist < nearestCargoDist) {
+                nearestCargoDist = dist;
+                nearestCargo = cargoVessel;
+            }
+        }
+        
+        // Choose target: only switch if cooldown is 0
+        if (enemy.targetSwitchCooldown === 0) {
+            // Choose target: cargo vessel (40% chance in mission mode), ally (30% chance if nearby), or player
+            if (gameState.gameMode === 'mission' && nearestCargo && Math.random() < 0.4) {
+                targetX = nearestCargo.x;
+                targetY = nearestCargo.y;
+                newTargetType = 'cargo';
+                enemy.targetSwitchCooldown = 120; // 2 seconds at 60fps
+            } else if (nearestAlly && nearestAllyDist < 200 && Math.random() < 0.3) {
+                // 30% chance to target nearby ally
+                targetX = nearestAlly.x;
+                targetY = nearestAlly.y;
+                newTargetType = 'ally';
+                enemy.targetSwitchCooldown = 120;
+            } else {
+                newTargetType = 'player';
+                enemy.targetSwitchCooldown = 60; // Shorter cooldown for player target
+            }
+            enemy.targetType = newTargetType;
+        } else {
+            // Keep current target based on targetType
+            if (enemy.targetType === 'cargo' && nearestCargo) {
+                targetX = nearestCargo.x;
+                targetY = nearestCargo.y;
+            } else if (enemy.targetType === 'ally' && nearestAlly && nearestAllyDist < 300) {
+                targetX = nearestAlly.x;
+                targetY = nearestAlly.y;
+            } else {
+                // Fallback to player if target is invalid
+                targetX = player.x;
+                targetY = player.y;
+                enemy.targetType = 'player';
+            }
+        }
+        
+        // Separation force to prevent overlapping with other enemies
+        let separationX = 0;
+        let separationY = 0;
+        const separationRadius = 60; // Distance to maintain from other enemies
+        const separationForce = 0.3;
+        
+        enemies.forEach(other => {
+            if (other === enemy) return;
+            const dx = enemy.x - other.x;
+            const dy = enemy.y - other.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 0 && dist < separationRadius) {
+                const force = (separationRadius - dist) / separationRadius;
+                separationX += (dx / dist) * force * separationForce;
+                separationY += (dy / dist) * force * separationForce;
+            }
+        });
+        
+        // Pursue target with circling behavior (avoid ramming)
             const dx = targetX - enemy.x;
             const dy = targetY - enemy.y;
             const dist = Math.hypot(dx, dy);
+        
+        if (dist > 0) {
+            const pursuitForce = enemy.pursuitSpeed || 0.8;
+            const minDistance = 80; // Minimum distance to maintain from target
+            const maxDistance = 150; // Preferred distance for circling
+            const repulsionForce = 0.4; // Force to push away when too close
+            const circlingForce = 0.3; // Force to circle around target
+            
+            let pursuitX = 0;
+            let pursuitY = 0;
+            let repulsionX = 0;
+            let repulsionY = 0;
+            let circlingX = 0;
+            let circlingY = 0;
+            
+            if (dist < minDistance) {
+                // Too close - push away from target
+                repulsionX = -(dx / dist) * repulsionForce * ((minDistance - dist) / minDistance);
+                repulsionY = -(dy / dist) * repulsionForce * ((minDistance - dist) / minDistance);
+            } else if (dist > maxDistance) {
+                // Too far - move toward target
+                pursuitX = (dx / dist) * pursuitForce;
+                pursuitY = (dy / dist) * pursuitForce;
+            } else {
+                // At preferred distance - circle around target
+                // Calculate tangential direction (perpendicular to direction to target)
+                // Rotate 90 degrees: (dx, dy) -> (-dy, dx) for clockwise, (dy, -dx) for counter-clockwise
+                const tangentX = -dy / dist; // Perpendicular vector (normalized)
+                const tangentY = dx / dist;
+                
+                // Use consistent circling direction for this enemy
+                circlingX = tangentX * circlingForce * enemy.circleDirection;
+                circlingY = tangentY * circlingForce * enemy.circleDirection;
+                
+                // Slight pull toward preferred distance
+                const distanceError = dist - (minDistance + maxDistance) / 2;
+                pursuitX = (dx / dist) * pursuitForce * 0.3 * (distanceError / maxDistance);
+                pursuitY = (dy / dist) * pursuitForce * 0.3 * (distanceError / maxDistance);
+            }
+            
+            // Combine all forces
+            enemy.vx = pursuitX + repulsionX + circlingX + separationX;
+            enemy.vy = pursuitY + repulsionY + circlingY + separationY;
+        } else {
+            // Apply separation even if at target
+            enemy.vx = separationX;
+            enemy.vy = separationY;
+        }
+        
+        // Update position
+        enemy.x += enemy.vx;
+        enemy.y += enemy.vy;
+        
+        // Orient enemy toward target (pointy end faces target)
+        // Calculate angle to target
+        const angleToTarget = Math.atan2(dy, dx);
+        // Enemy shape: pointy end is at (0, enemy.height/2) which is the bottom in rotated coords
+        // At rotation 0, the ship's bottom (pointy end) points down (positive Y = Math.PI/2)
+        // To make the pointy end point toward the target, we need to rotate so that
+        // the bottom point (which is at angle Math.PI/2 when rotation=0) aligns with angleToTarget
+        // So: rotation = angleToTarget - Math.PI/2
+        enemy.targetRotation = angleToTarget - Math.PI / 2;
+        
+        // Smoothly interpolate rotation to prevent flickering
+        let angleDiff = enemy.targetRotation - enemy.rotation;
+        // Normalize angle difference to [-PI, PI]
+        while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+        while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+        
+        // Smooth rotation with max rotation speed
+        const maxRotationSpeed = 0.1; // Radians per frame
+        if (Math.abs(angleDiff) > maxRotationSpeed) {
+            enemy.rotation += Math.sign(angleDiff) * maxRotationSpeed;
+        } else {
+            enemy.rotation = enemy.targetRotation;
+        }
+        
+        // Keep enemy on screen (bounce off edges or wrap around)
+        const margin = 20;
+        if (enemy.x < margin) {
+            enemy.x = margin;
+            enemy.vx = Math.abs(enemy.vx) * 0.5; // Bounce
+        } else if (enemy.x > canvas.width - margin) {
+            enemy.x = canvas.width - margin;
+            enemy.vx = -Math.abs(enemy.vx) * 0.5; // Bounce
+        }
+        if (enemy.y < margin) {
+            enemy.y = margin;
+            enemy.vy = Math.abs(enemy.vy) * 0.5; // Bounce
+        } else if (enemy.y > canvas.height - margin) {
+            enemy.y = canvas.height - margin;
+            enemy.vy = -Math.abs(enemy.vy) * 0.5; // Bounce
+        }
+        
+        enemy.shootCooldown--;
+
+        // Enemy shooting (can shoot from anywhere on screen)
+        if (enemy.shootCooldown <= 0 && dist > 0) {
+            enemy.shootCooldown = 60 + Math.random() * 60;
+            sounds.enemyShot();
+            
+            // Shoot at target from the front of the enemy (pointy end)
+            // Enemy's pointy end is at the bottom in rotated coords: (0, enemy.height/2)
+            // Transform to world coordinates
+            const frontX = enemy.x + Math.sin(enemy.rotation) * (enemy.height / 2);
+            const frontY = enemy.y - Math.cos(enemy.rotation) * (enemy.height / 2);
+            
             bullets.push({
-                x: enemy.x,
-                y: enemy.y + enemy.height / 2,
+                x: frontX,
+                y: frontY,
                 vx: (dx / dist) * 3,
                 vy: (dy / dist) * 3,
                 damage: enemy.damage,
@@ -1062,7 +1419,36 @@ function updateEnemies() {
                 currency += 5;
                 cumulativeCredits += 5; // Track cumulative credits
             }
+            
+            // No powerups from enemies - only from asteroids
             return false;
+        }
+        
+        // Check collision with allies
+        for (let i = 0; i < allies.length; i++) {
+            const ally = allies[i];
+            if (checkCollision(enemy, ally)) {
+                ally.health -= enemy.damage * 2;
+                sounds.enemyExplosion();
+                createExplosion(enemy.x, enemy.y, 30);
+                gameState.score += 50;
+                gameState.enemiesKilled++;
+                
+                // Check if ally is destroyed
+                if (ally.health <= 0) {
+                    createExplosion(ally.x, ally.y, 25);
+                    
+                    // No powerups from destroyed allies - remove ally
+                    allies.splice(i, 1);
+                }
+                
+                // Award credits in normal mode
+                if (gameState.gameMode === 'normal') {
+                    currency += 5;
+                    cumulativeCredits += 5;
+                }
+                return false;
+            }
         }
         
         // Check collision with cargo vessel in mission mode
@@ -1086,20 +1472,23 @@ function updateEnemies() {
                 cumulativeCredits += 5; // Track cumulative credits
             }
             
-            // Drop powerup
-            if (Math.random() < 0.3) {
-                spawnPowerup(enemy.x, enemy.y);
-            }
+            // No powerups from enemies - only from asteroids
             return false;
         }
 
-        return enemy.y < canvas.height + 50;
+        // Keep enemy on screen - only remove if destroyed
+        return true;
     });
 }
 
 // Update asteroids
 function updateAsteroids() {
     asteroids = asteroids.filter(asteroid => {
+        // Apply tractor beam force if this asteroid is the target
+        if (tractorBeam.active && tractorBeam.target === asteroid && tractorBeam.targetType === 'asteroid') {
+            // Force is already applied in updateTractorBeam, just update position
+        }
+        
         asteroid.x += asteroid.vx;
         asteroid.y += asteroid.vy;
         asteroid.rotation += asteroid.rotationSpeed;
@@ -1137,8 +1526,8 @@ function updateAsteroids() {
                 cumulativeCredits += 2; // Track cumulative credits
             }
             
-            // Drop powerup
-            if (Math.random() < 0.2) {
+            // Drop upgrade powerup from destroyed asteroids (incentive to mine them)
+            if (Math.random() < 0.4) { // 40% chance to drop upgrade
                 spawnPowerup(asteroid.x, asteroid.y);
             }
             return false;
@@ -1150,47 +1539,176 @@ function updateAsteroids() {
 
 // Powerups
 function spawnPowerup(x, y) {
-    const types = ['health', 'shield', 'ammo', 'upgrade'];
-    const type = types[Math.floor(Math.random() * types.length)];
-    
+    // Always spawn upgrade type - opens upgrade menu when collected
     powerups.push({
         x: x,
         y: y,
         width: 20,
         height: 20,
-        vy: 2,
-        type: type,
+        vy: 0, // Stay in place
+        type: 'upgrade', // Always upgrade type
         rotation: 0,
         rotationSpeed: 0.05,
-        pulse: 0
+        pulse: 0,
+        spawnTime: Date.now() // Track when powerup was spawned
     });
 }
 
 function updatePowerups() {
+    const now = Date.now();
+    const lifetime = 3000; // 3 seconds in milliseconds
+    
     powerups = powerups.filter(powerup => {
-        powerup.y += powerup.vy;
+        // Powerups stay in place (no movement)
+        // powerup.y += powerup.vy; // Removed - powerups don't move
         powerup.rotation += powerup.rotationSpeed;
         powerup.pulse += 0.1;
+
+        // Check if powerup has expired (3 seconds)
+        if (now - powerup.spawnTime > lifetime) {
+            return false; // Remove expired powerup
+        }
 
         if (checkCollision(powerup, player)) {
             collectPowerup(powerup.type);
             return false;
         }
 
-        return powerup.y < canvas.height + 20;
+        return true; // Keep powerup if not expired and not collected
     });
+}
+
+// Tractor Beam Functions
+function findNearestTractorTarget() {
+    let nearestTarget = null;
+    let nearestDist = tractorBeam.range;
+    let targetType = null;
+    
+    // Calculate player's front position (where tractor beam emits from)
+    const frontX = player.x + Math.sin(player.rotation) * (player.height / 2);
+    const frontY = player.y - Math.cos(player.rotation) * (player.height / 2);
+    
+    // Check asteroids first (primary target for mining)
+    asteroids.forEach(asteroid => {
+        const dx = asteroid.x - frontX;
+        const dy = asteroid.y - frontY;
+        const dist = Math.hypot(dx, dy);
+        if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestTarget = asteroid;
+            targetType = 'asteroid';
+        }
+    });
+    
+    // Check enemies (secondary target)
+    enemies.forEach(enemy => {
+        const dx = enemy.x - frontX;
+        const dy = enemy.y - frontY;
+        const dist = Math.hypot(dx, dy);
+        if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestTarget = enemy;
+            targetType = 'enemy';
+        }
+    });
+    
+    return { target: nearestTarget, type: targetType };
+}
+
+function activateTractorBeam() {
+    if (tractorBeam.charge <= 0 || tractorBeam.active) return;
+    
+    const result = findNearestTractorTarget();
+    if (result.target) {
+        tractorBeam.active = true;
+        tractorBeam.target = result.target;
+        tractorBeam.targetType = result.type;
+        tractorBeam.currentDuration = 0;
+    }
+}
+
+function deactivateTractorBeam() {
+    tractorBeam.active = false;
+    tractorBeam.target = null;
+    tractorBeam.targetType = null;
+    tractorBeam.currentDuration = 0;
+}
+
+function updateTractorBeam() {
+    if (!tractorBeam.active) {
+        // Recharge when not active
+        if (tractorBeam.charge < tractorBeam.maxCharge) {
+            tractorBeam.charge = Math.min(tractorBeam.maxCharge, tractorBeam.charge + tractorBeam.rechargeRate);
+        }
+        return;
+    }
+    
+    // Drain charge while active
+    tractorBeam.charge = Math.max(0, tractorBeam.charge - tractorBeam.drainRate);
+    tractorBeam.currentDuration++;
+    
+    // Deactivate if charge depleted or max duration reached
+    if (tractorBeam.charge <= 0 || tractorBeam.currentDuration >= tractorBeam.maxDuration) {
+        deactivateTractorBeam();
+        return;
+    }
+    
+    // Check if target still exists and is in range
+    if (!tractorBeam.target) {
+        deactivateTractorBeam();
+        return;
+    }
+    
+    // Calculate player's front position
+    const frontX = player.x + Math.sin(player.rotation) * (player.height / 2);
+    const frontY = player.y - Math.cos(player.rotation) * (player.height / 2);
+    
+    const dx = tractorBeam.target.x - frontX;
+    const dy = tractorBeam.target.y - frontY;
+    const dist = Math.hypot(dx, dy);
+    
+    // Deactivate if target is out of range
+    if (dist > tractorBeam.range) {
+        deactivateTractorBeam();
+        return;
+    }
+    
+    // Apply pull force toward player (slowly)
+    // dx and dy point FROM player TO target, so we need to NEGATE them to pull TOWARD player
+    if (tractorBeam.targetType === 'asteroid') {
+        // Slow, gentle pull force for asteroids
+        const pullForce = 0.05; // Reduced from 0.15 - slower pull
+        const pullX = -(dx / dist) * pullForce; // Negate to pull toward player
+        const pullY = -(dy / dist) * pullForce; // Negate to pull toward player
+        
+        // Apply pull force (adds to existing velocity, maintaining momentum)
+        tractorBeam.target.vx += pullX;
+        tractorBeam.target.vy += pullY;
+        
+        // More damping to slow down movement and make it more controlled
+        const damping = 0.95; // Increased damping for slower, smoother movement
+        tractorBeam.target.vx *= damping;
+        tractorBeam.target.vy *= damping;
+    } else if (tractorBeam.targetType === 'enemy') {
+        // Slow pull force for enemies
+        const enemyPullForce = 0.03; // Reduced from 0.08 - slower pull
+        const pullX = -(dx / dist) * enemyPullForce; // Negate to pull toward player
+        const pullY = -(dy / dist) * enemyPullForce; // Negate to pull toward player
+        
+        tractorBeam.target.vx += pullX;
+        tractorBeam.target.vy += pullY;
+        
+        // More damping for enemies (slower, more controlled movement)
+        const enemyDamping = 0.97; // Increased damping
+        tractorBeam.target.vx *= enemyDamping;
+        tractorBeam.target.vy *= enemyDamping;
+    }
 }
 
 function collectPowerup(type) {
     sounds.powerupCollect();
-    if (type === 'health') {
-        player.health = Math.min(player.maxHealth, player.health + 30);
-    } else if (type === 'shield') {
-        player.shields = Math.min(player.maxShields, player.shields + 25);
-    } else if (type === 'ammo') {
-        weapons.missile.ammo = Math.min(weapons.missile.maxAmmo, weapons.missile.ammo + 2);
-        weapons.laser.ammo = Math.min(weapons.laser.maxAmmo, weapons.laser.ammo + 1);
-    } else if (type === 'upgrade') {
+    // All powerups are now upgrade type - opens upgrade menu
+    if (type === 'upgrade') {
         upgradePoints++;
         showUpgradeMenu();
     }
@@ -1346,11 +1864,6 @@ function showUpgradeMenu() {
     const upgradeList = [
         { key: 'health', name: 'Max Health +20', desc: 'Increases maximum health' },
         { key: 'shields', name: 'Max Shields +15', desc: 'Increases maximum shields' },
-        { key: 'speed', name: 'Speed +1', desc: 'Increases movement speed' },
-        { key: 'primaryDamage', name: 'Primary Damage +10%', desc: 'Increases primary weapon damage' },
-        { key: 'missileDamage', name: 'Missile Damage +10%', desc: 'Increases missile damage' },
-        { key: 'laserDamage', name: 'Laser Damage +10%', desc: 'Increases laser damage' },
-        { key: 'shieldRegen', name: 'Shield Regen +0.02', desc: 'Increases shield regeneration' },
         { key: 'ally', name: 'Player Ally Ship', desc: 'Adds an ally ship to help you' },
         { key: 'cargoAlly', name: 'Cargo Ship Ally', desc: 'Adds an ally ship to protect the cargo vessel' }
     ];
@@ -1385,16 +1898,10 @@ function applyUpgrade(key) {
     } else if (key === 'shields') {
         player.maxShields += 15;
         player.shields += 15;
-    } else if (key === 'speed') {
-        player.speed += 1;
-    } else if (key === 'shieldRegen') {
-        player.shieldRegen += 0.02;
     } else if (key === 'ally') {
         spawnAlly();
     } else if (key === 'cargoAlly') {
         spawnCargoAlly();
-    } else {
-        upgrade.level++;
     }
 }
 
@@ -1412,7 +1919,9 @@ function spawnCargoAlly() {
         offsetAngle: Math.random() * Math.PI * 2,
         orbitRadius: 80 + Math.random() * 40,
         isCargoAlly: true,
-        target: cargoVessel
+        target: cargoVessel,
+        health: 50,
+        maxHealth: 50
     });
 }
 
@@ -1470,7 +1979,7 @@ function drawPlayer() {
     ctx.save();
     ctx.translate(player.x, player.y);
     
-    // Health bar above ship
+    // Health bar above ship (drawn before rotation so it stays upright)
     const healthPercent = player.health / player.maxHealth;
     const barWidth = player.width + 10;
     const barHeight = 4;
@@ -1491,6 +2000,9 @@ function drawPlayer() {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
     ctx.lineWidth = 1;
     ctx.strokeRect(-barWidth / 2, barY, barWidth, barHeight);
+    
+    // Now rotate for ship drawing
+    ctx.rotate(player.rotation);
     
     // Shield effect with glow (enhanced to show status)
     if (player.shields > 0) {
@@ -1532,24 +2044,41 @@ function drawPlayer() {
         ctx.setLineDash([]);
     }
 
-    // Engine glow
+    // Engine glow (drawn at back of ship, relative to rotation)
+    // Back of ship is at (0, player.height/2) in rotated coordinates
     if (player.engineGlow > 0) {
-        const glowGradient = ctx.createLinearGradient(0, player.height / 2, 0, player.height / 2 + 15);
+        // Engine glow gradient - extends backward from the ship
+        const backY = player.height / 2; // Back of ship in rotated coords
+        const glowGradient = ctx.createLinearGradient(0, backY, 0, backY + 15);
         glowGradient.addColorStop(0, `rgba(0, 200, 255, ${player.engineGlow * 0.8})`);
         glowGradient.addColorStop(0.5, `rgba(100, 200, 255, ${player.engineGlow * 0.5})`);
         glowGradient.addColorStop(1, 'rgba(0, 200, 255, 0)');
         
         ctx.fillStyle = glowGradient;
-        ctx.fillRect(-player.width / 4, player.height / 2, player.width / 2, 15);
+        ctx.fillRect(-player.width / 4, backY, player.width / 2, 15);
         
-        // Engine particles
+        // Engine particles - spawn at back of ship and move backward relative to rotation
         for (let i = 0; i < 3; i++) {
             const offset = (i - 1) * 8;
+            // Back of ship in rotated coords is at (offset, backY)
+            // Transform to world coordinates using rotation matrix
+            // For a point (x, y) in rotated space: 
+            // worldX = centerX + x*cos(rot) - y*sin(rot)
+            // worldY = centerY + x*sin(rot) + y*cos(rot)
+            // But canvas Y increases downward, so we adjust:
+            const backWorldX = player.x + offset * Math.cos(player.rotation) - backY * Math.sin(player.rotation);
+            const backWorldY = player.y + offset * Math.sin(player.rotation) + backY * Math.cos(player.rotation);
+            // Particle velocity should be backward relative to ship rotation (opposite of forward direction)
+            // Forward is (sin(rotation), -cos(rotation)), so backward is (-sin(rotation), cos(rotation))
+            const particleSpeed = 2 + Math.random() * 2;
+            const particleVx = -Math.sin(player.rotation) * particleSpeed;
+            const particleVy = Math.cos(player.rotation) * particleSpeed;
+            
             particles.push({
-                x: player.x + offset,
-                y: player.y + player.height / 2 + 5,
-                vx: (Math.random() - 0.5) * 2,
-                vy: 2 + Math.random() * 2,
+                x: backWorldX,
+                y: backWorldY,
+                vx: particleVx + (Math.random() - 0.5) * 1,
+                vy: particleVy + (Math.random() - 0.5) * 1,
                 life: 10,
                 maxLife: 10,
                 size: 2,
@@ -1689,9 +2218,8 @@ function drawEnemies() {
     enemies.forEach(enemy => {
         ctx.save();
         ctx.translate(enemy.x, enemy.y);
-        ctx.rotate(enemy.rotation);
         
-        // Health bar
+        // Health bar (drawn before rotation so it stays upright)
         const healthPercent = enemy.health / enemy.maxHealth;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.fillRect(-enemy.width / 2 - 2, -enemy.height / 2 - 12, enemy.width + 4, 6);
@@ -1699,6 +2227,9 @@ function drawEnemies() {
         ctx.fillRect(-enemy.width / 2, -enemy.height / 2 - 10, enemy.width, 4);
         ctx.fillStyle = 'green';
         ctx.fillRect(-enemy.width / 2, -enemy.height / 2 - 10, enemy.width * healthPercent, 4);
+        
+        // Now rotate for ship drawing
+        ctx.rotate(enemy.rotation);
         
         // Enemy glow
         ctx.shadowBlur = 15;
@@ -1734,6 +2265,71 @@ function drawEnemies() {
         
         ctx.restore();
     });
+}
+
+function drawTractorBeam() {
+    if (!tractorBeam.active || !tractorBeam.target) return;
+    
+    // Calculate player's front position (where tractor beam emits from)
+    const frontX = player.x + Math.sin(player.rotation) * (player.height / 2);
+    const frontY = player.y - Math.cos(player.rotation) * (player.height / 2);
+    
+    // Target position
+    const targetX = tractorBeam.target.x;
+    const targetY = tractorBeam.target.y;
+    
+    // Draw tractor beam line with glow effect
+    ctx.save();
+    
+    // Outer glow
+    ctx.strokeStyle = '#00ffff';
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = '#00ffff';
+    ctx.lineWidth = 4;
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(frontX, frontY);
+    ctx.lineTo(targetX, targetY);
+    ctx.stroke();
+    
+    // Inner bright line
+    ctx.strokeStyle = '#ffffff';
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(frontX, frontY);
+    ctx.lineTo(targetX, targetY);
+    ctx.stroke();
+    
+    // Pulsing effect
+    const pulse = Math.sin(Date.now() / 100) * 0.3 + 0.7;
+    ctx.strokeStyle = `rgba(0, 255, 255, ${pulse * 0.5})`;
+    ctx.shadowBlur = 15;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = pulse * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(frontX, frontY);
+    ctx.lineTo(targetX, targetY);
+    ctx.stroke();
+    
+    // Draw particles along the beam
+    for (let i = 0; i < 5; i++) {
+        const t = (Date.now() / 50 + i * 0.2) % 1;
+        const x = frontX + (targetX - frontX) * t;
+        const y = frontY + (targetY - frontY) * t;
+        
+        ctx.fillStyle = '#00ffff';
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = '#00ffff';
+        ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    ctx.restore();
 }
 
 function drawAsteroids() {
@@ -1794,21 +2390,9 @@ function drawPowerups() {
         ctx.translate(powerup.x, powerup.y);
         ctx.rotate(powerup.rotation);
         
-        let color = '#ffffff';
-        let glowColor = '#ffffff';
-        if (powerup.type === 'health') {
-            color = '#ff0000';
-            glowColor = '#ff6666';
-        } else if (powerup.type === 'shield') {
-            color = '#0066ff';
-            glowColor = '#66aaff';
-        } else if (powerup.type === 'ammo') {
-            color = '#ffff00';
-            glowColor = '#ffffaa';
-        } else if (powerup.type === 'upgrade') {
-            color = '#ff00ff';
-            glowColor = '#ff66ff';
-        }
+        // Single color for all upgrade powerups
+        const color = '#ff00ff'; // Magenta/purple
+        const glowColor = '#ff66ff';
         
         const pulseSize = powerup.width / 2 * (1 + Math.sin(powerup.pulse) * 0.3);
         
@@ -1939,20 +2523,7 @@ function drawParticles() {
 
 // Mission Mode Functions
 function initMissionMode() {
-    // Create cargo vessel
-    cargoVessel = {
-        x: 100,
-        y: canvas.height / 2,
-        width: 60,
-        height: 40,
-        speed: 1.5,
-        health: 200,
-        maxHealth: 200,
-        progress: 0,
-        targetX: canvas.width - 150,
-        direction: 1, // 1 = going right, -1 = going left
-        journeyComplete: false
-    };
+    if (!canvas) return;
     
     // Create start planet (left side)
     startPlanet = {
@@ -1969,34 +2540,86 @@ function initMissionMode() {
         radius: 40,
         color: '#e24a4a'
     };
+    
+    // Calculate distance between planets
+    const distance = Math.hypot(endPlanet.x - startPlanet.x, endPlanet.y - startPlanet.y);
+    
+    // Fixed journey time in seconds (30 seconds base)
+    const baseJourneyTimeSeconds = 30;
+    const baseJourneyTimeFrames = baseJourneyTimeSeconds * 60; // 60 fps
+    
+    // Create cargo vessel with calculated speed for fixed journey time
+    cargoVessel = {
+        x: startPlanet.x + 50, // Start slightly to the right of start planet
+        y: startPlanet.y,
+        width: 60,
+        height: 40,
+        speed: 0, // Will be calculated based on fixed journey time
+        health: 200,
+        maxHealth: 200,
+        progress: 0,
+        targetX: endPlanet.x - 50, // Target slightly to the left of end planet
+        targetY: endPlanet.y,
+        direction: 1, // 1 = going right, -1 = going left
+        journeyComplete: false,
+        journeyTime: 0,
+        maxJourneyTime: baseJourneyTimeFrames, // Fixed journey time in frames
+        distance: distance - 100 // Distance to travel (minus planet radii)
+    };
+    
+    // Calculate base speed to complete journey in fixed time
+    // Speed = distance / time (in pixels per frame)
+    cargoVessel.baseSpeed = cargoVessel.distance / baseJourneyTimeFrames;
+    cargoVessel.speed = cargoVessel.baseSpeed;
 }
 
 function updateCargoVessel() {
     if (!cargoVessel || gameState.gameMode !== 'mission') return;
     
+    // Apply navigation crew effect - reduces journey time proportionally
+    // More crew = faster journey (reduced journey time, not increased speed)
+    const navigationCrewCount = cargoCrewAllocation.navigation.length;
+    const journeyTimeReduction = navigationCrewCount * 0.1; // 10% time reduction per crew
+    const effectiveJourneyTime = cargoVessel.maxJourneyTime * (1 - journeyTimeReduction);
+    
+    // Recalculate speed based on effective journey time
+    // Speed = distance / time (in pixels per frame)
+    cargoVessel.speed = cargoVessel.distance / effectiveJourneyTime;
+    
     // Move cargo vessel towards destination
     const dx = cargoVessel.targetX - cargoVessel.x;
-    const distance = Math.abs(dx);
+    const dy = cargoVessel.targetY - cargoVessel.y;
+    const distance = Math.hypot(dx, dy);
     
     if (distance > 5) {
+        // Move towards target
         cargoVessel.x += (dx / distance) * cargoVessel.speed;
+        cargoVessel.y += (dy / distance) * cargoVessel.speed;
+        
+        // Update journey time
+        cargoVessel.journeyTime++;
     } else {
         // Reached destination - reverse direction
         cargoVessel.direction *= -1;
         if (cargoVessel.direction === 1) {
-            // Going right
-            cargoVessel.targetX = canvas.width - 150;
+            // Going right (towards end planet)
+            cargoVessel.targetX = endPlanet.x - 50;
+            cargoVessel.targetY = endPlanet.y;
+            cargoVessel.x = startPlanet.x + 50;
+            cargoVessel.y = startPlanet.y;
         } else {
-            // Going left
-            cargoVessel.targetX = 100;
+            // Going left (towards start planet)
+            cargoVessel.targetX = startPlanet.x + 50;
+            cargoVessel.targetY = startPlanet.y;
+            cargoVessel.x = endPlanet.x - 50;
+            cargoVessel.y = endPlanet.y;
         }
         cargoVessel.journeyComplete = true;
+        cargoVessel.journeyTime = 0; // Reset journey time
     }
     
-    // Update progress
-    const totalDistance = canvas.width - 200;
-    const traveled = Math.abs(cargoVessel.x - 100);
-    cargoVessel.progress = Math.min(100, (traveled / totalDistance) * 100);
+    // Update progress based on journey time
+    cargoVessel.progress = Math.min(100, (cargoVessel.journeyTime / effectiveJourneyTime) * 100);
     
     // Check if completed a journey
     if (cargoVessel.journeyComplete && distance < 10) {
@@ -2015,11 +2638,6 @@ function updateCargoVessel() {
         const healRate = engineeringCrewCount * 0.5; // 0.5 HP/sec per crew
         cargoVessel.health = Math.min(cargoVessel.maxHealth, cargoVessel.health + healRate * 0.1);
     }
-    
-    // Apply navigation crew effect
-    const navigationCrewCount = cargoCrewAllocation.navigation.length;
-    const speedMultiplier = 1 + (navigationCrewCount * 0.1); // 10% speed per crew
-    cargoVessel.speed = 1.5 * speedMultiplier; // Base speed 1.5, modified by crew
 }
 
 function drawCargoVessel() {
@@ -2233,16 +2851,47 @@ function updateCargoCrewAllocation() {
 
 function updateCommandModuleUI() {
     document.getElementById('totalCrew').textContent = totalCrew;
-    document.getElementById('currency').textContent = currency;
+    // Update currency in both tabs
+    const currencyCrewEl = document.getElementById('currencyCrew');
+    const currencyStoreEl = document.getElementById('currencyStore');
+    if (currencyCrewEl) currencyCrewEl.textContent = currency;
+    if (currencyStoreEl) currencyStoreEl.textContent = currency;
     const recruitBtn = document.getElementById('recruitCrewBtn');
     if (recruitBtn) {
         const cost = getCrewCost();
         recruitBtn.disabled = currency < cost;
         recruitBtn.textContent = `Recruit Crew (${cost} credits)`;
     }
-    const buyClusterBtn = document.getElementById('buyClusterBtn');
-    if (buyClusterBtn) {
-        buyClusterBtn.disabled = currency < 1000;
+    // Update store items
+    const buyMissileBtn = document.getElementById('buyMissileBtn');
+    if (buyMissileBtn) {
+        buyMissileBtn.disabled = currency < 200;
+    }
+    
+    const buyLaserBtn = document.getElementById('buyLaserBtn');
+    if (buyLaserBtn) {
+        buyLaserBtn.disabled = currency < 300;
+    }
+    
+    // Update cargo ship store item (only in mission mode)
+    const cargoShipStoreItem = document.getElementById('cargoShipStoreItem');
+    if (cargoShipStoreItem) {
+        cargoShipStoreItem.style.display = gameState.gameMode === 'mission' ? 'block' : 'none';
+    }
+    
+    const cargoShipCountEl = document.getElementById('cargoShipCount');
+    if (cargoShipCountEl) {
+        cargoShipCountEl.textContent = cargoShipCount;
+    }
+    
+    const cargoShipPriceEl = document.getElementById('cargoShipPrice');
+    if (cargoShipPriceEl) {
+        cargoShipPriceEl.textContent = cargoShipPrice;
+    }
+    
+    const buyCargoShipBtn = document.getElementById('buyCargoShipBtn');
+    if (buyCargoShipBtn) {
+        buyCargoShipBtn.disabled = currency < cargoShipPrice;
     }
     
     // Show/hide cargo ship crew section based on game mode
@@ -2398,12 +3047,81 @@ function updateCommandModuleUI() {
     }
 }
 
+// Store functions
+function buyMissileAmmo() {
+    if (currency >= 200) {
+        currency -= 200;
+        weapons.missile.ammo = Math.min(weapons.missile.maxAmmo, weapons.missile.ammo + 2);
+        updateCommandModuleUI();
+        updateUI();
+    }
+}
+
+function buyLaserAmmo() {
+    if (currency >= 300) {
+        currency -= 300;
+        weapons.laser.ammo = Math.min(weapons.laser.maxAmmo, weapons.laser.ammo + 1);
+        updateCommandModuleUI();
+        updateUI();
+    }
+}
+
+function buyCargoShip() {
+    if (currency >= cargoShipPrice && gameState.gameMode === 'mission') {
+        currency -= cargoShipPrice;
+        cargoShipCount++;
+        // Calculate next price (2.5x the current price)
+        cargoShipPrice = Math.floor(cargoShipPrice * 2.5);
+        
+        // Spawn new cargo vessel
+        spawnCargoVessel();
+        
+        updateCommandModuleUI();
+        updateUI();
+    }
+}
+
+function spawnCargoVessel() {
+    // Create a new cargo vessel at the start planet
+    if (!startPlanet || !endPlanet || !canvas) return;
+    
+    // Calculate distance between planets
+    const distance = Math.hypot(endPlanet.x - startPlanet.x, endPlanet.y - startPlanet.y);
+    
+    // Fixed journey time in seconds (30 seconds base)
+    const baseJourneyTimeSeconds = 30;
+    const baseJourneyTimeFrames = baseJourneyTimeSeconds * 60; // 60 fps
+    const travelDistance = distance - 100; // Distance to travel (minus planet radii)
+    
+    // Calculate base speed to complete journey in fixed time
+    const baseSpeed = travelDistance / baseJourneyTimeFrames;
+    
+    cargoVessels.push({
+        x: startPlanet.x + 50,
+        y: startPlanet.y,
+        width: 60,
+        height: 60,
+        health: 200,
+        maxHealth: 200,
+        speed: baseSpeed,
+        baseSpeed: baseSpeed,
+        targetX: endPlanet.x - 50,
+        targetY: endPlanet.y,
+        progress: 0,
+        journeyTime: 0,
+        maxJourneyTime: baseJourneyTimeFrames,
+        distance: travelDistance,
+        direction: 1,
+        journeyComplete: false
+    });
+}
+
 function startCrewDrag(e, crewId, station, ship) {
     isDraggingCrew = crewId;
     dragSourceStation = station;
     if (e.dataTransfer) {
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', JSON.stringify({ crewId, station, ship }));
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', JSON.stringify({ crewId, station, ship }));
     }
     if (e.target) {
         e.target.classList.add('dragging');
@@ -2771,6 +3489,14 @@ function updateUI() {
     document.getElementById('clusterCooldown').style.width = clusterCooldown + '%';
     document.getElementById('clusterAmmo').textContent = weapons.cluster.ammo;
     
+    // Update tractor beam charge display (if element exists)
+    const tractorBeamChargeEl = document.getElementById('tractorBeamCharge');
+    if (tractorBeamChargeEl) {
+        const chargePercent = (tractorBeam.charge / tractorBeam.maxCharge) * 100;
+        tractorBeamChargeEl.style.width = chargePercent + '%';
+        tractorBeamChargeEl.parentElement.title = `Tractor Beam: ${Math.ceil(tractorBeam.charge)}% (Press T)`;
+    }
+    
     // Update mobile weapon displays and button states
     updateMobileWeaponUI();
 }
@@ -2869,6 +3595,7 @@ function gameLoop() {
         if (!gameState.paused) {
             // Update
             updatePlayer();
+            updateTractorBeam();
             updateBullets();
             updateEnemies();
             updateAsteroids();
@@ -2942,6 +3669,7 @@ function gameLoop() {
         drawParticles();
         drawAsteroids();
         drawEnemies();
+        drawTractorBeam(); // Draw tractor beam
         drawPowerups();
         drawAllies();
         drawBullets();
@@ -2968,7 +3696,9 @@ function startNormalMode() {
     gameState.missionComplete = false;
     gameState.journeyCount = 0;
     currency = 0; // Reset currency when switching modes
-    cargoVessel = null;
+    cargoVessels = [];
+    cargoShipCount = 0;
+    cargoShipPrice = 2000; // Reset to base price
     startPlanet = null;
     endPlanet = null;
     document.getElementById('modeSelect').classList.add('hidden');
@@ -3097,29 +3827,106 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeCrew();
     setupCrewDragAndDrop();
     
+    // Set up HUD toggle
+    const hudToggle = document.getElementById('hudToggle');
+    const hudContent = document.getElementById('hudContent');
+    if (hudToggle && hudContent) {
+        hudToggle.addEventListener('click', () => {
+            hudContent.classList.toggle('collapsed');
+            hudToggle.textContent = hudContent.classList.contains('collapsed') ? '▲' : '▼';
+        });
+    }
+    
     // Set up button event listeners
-    document.getElementById('restartBtn').addEventListener('click', restartGame);
-    document.getElementById('missionRestartBtn').addEventListener('click', () => {
-        document.getElementById('missionComplete').classList.add('hidden');
-        showModeSelect();
-    });
-    document.getElementById('closeUpgrade').addEventListener('click', () => {
-        document.getElementById('upgradeMenu').classList.add('hidden');
-        gameState.paused = false;
-    });
+    const restartBtn = document.getElementById('restartBtn');
+    if (restartBtn) {
+        restartBtn.addEventListener('click', restartGame);
+    }
+    
+    const missionRestartBtn = document.getElementById('missionRestartBtn');
+    if (missionRestartBtn) {
+        missionRestartBtn.addEventListener('click', () => {
+            document.getElementById('missionComplete').classList.add('hidden');
+            showModeSelect();
+        });
+    }
+    
+    const closeUpgradeBtn = document.getElementById('closeUpgrade');
+    if (closeUpgradeBtn) {
+        closeUpgradeBtn.addEventListener('click', () => {
+            document.getElementById('upgradeMenu').classList.add('hidden');
+            gameState.paused = false;
+        });
+    }
     
     // Command module buttons
-    document.getElementById('recruitCrewBtn').addEventListener('click', () => {
-        recruitCrew();
-    });
-    document.getElementById('buyClusterBtn').addEventListener('click', () => {
-        buyClusterAmmo();
-    });
-    document.getElementById('closeCommandModule').addEventListener('click', closeCommandModule);
+    const recruitCrewBtn = document.getElementById('recruitCrewBtn');
+    if (recruitCrewBtn) {
+        recruitCrewBtn.addEventListener('click', () => {
+            recruitCrew();
+        });
+    }
+    
+    const buyClusterBtn = document.getElementById('buyClusterBtn');
+    if (buyClusterBtn) {
+        buyClusterBtn.addEventListener('click', () => {
+            buyClusterAmmo();
+        });
+    }
+    
+    const closeCommandModuleBtn = document.getElementById('closeCommandModule');
+    if (closeCommandModuleBtn) {
+        closeCommandModuleBtn.addEventListener('click', closeCommandModule);
+    }
+    
+    // Tab switching
+    const crewTab = document.getElementById('crewTab');
+    const storeTab = document.getElementById('storeTab');
+    const crewTabContent = document.getElementById('crewTabContent');
+    const storeTabContent = document.getElementById('storeTabContent');
+    
+    if (crewTab && storeTab && crewTabContent && storeTabContent) {
+        crewTab.addEventListener('click', () => {
+            crewTab.classList.add('active');
+            storeTab.classList.remove('active');
+            crewTabContent.classList.remove('hidden');
+            storeTabContent.classList.add('hidden');
+        });
+        
+        storeTab.addEventListener('click', () => {
+            storeTab.classList.add('active');
+            crewTab.classList.remove('active');
+            storeTabContent.classList.remove('hidden');
+            crewTabContent.classList.add('hidden');
+        });
+    }
+    
+    // Store buy buttons
+    const buyMissileBtn = document.getElementById('buyMissileBtn');
+    if (buyMissileBtn) {
+        buyMissileBtn.addEventListener('click', buyMissileAmmo);
+    }
+    
+    const buyLaserBtn = document.getElementById('buyLaserBtn');
+    if (buyLaserBtn) {
+        buyLaserBtn.addEventListener('click', buyLaserAmmo);
+    }
+    
+    const buyCargoShipBtn = document.getElementById('buyCargoShipBtn');
+    if (buyCargoShipBtn) {
+        buyCargoShipBtn.addEventListener('click', buyCargoShip);
+    }
     
     // Mode selection buttons
-    document.getElementById('normalModeBtn').addEventListener('click', startNormalMode);
-    document.getElementById('missionModeBtn').addEventListener('click', startMissionMode);
+    const normalModeBtn = document.getElementById('normalModeBtn');
+    if (normalModeBtn) {
+        normalModeBtn.addEventListener('click', startNormalMode);
+    }
+    
+    const missionModeBtn = document.getElementById('missionModeBtn');
+    if (missionModeBtn) {
+        missionModeBtn.addEventListener('click', startMissionMode);
+    }
     
     // Mobile control buttons
     setupMobileControls();

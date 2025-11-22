@@ -39,11 +39,55 @@ body {
 
 #hud {
     background: rgba(0, 0, 0, 0.8);
-    padding: 15px;
+    padding: 10px 15px;
     border-radius: 8px;
     margin-bottom: 10px;
     border: 2px solid rgba(0, 150, 255, 0.5);
     box-shadow: 0 0 20px rgba(0, 150, 255, 0.3);
+    min-width: 200px;
+}
+
+.hud-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0;
+}
+
+.score-stat {
+    margin: 0;
+    flex: 1;
+}
+
+.hud-toggle {
+    background: rgba(0, 150, 255, 0.3);
+    border: 1px solid rgba(0, 150, 255, 0.5);
+    color: #66aaff;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.3s;
+    margin-left: 10px;
+}
+
+.hud-toggle:hover {
+    background: rgba(0, 150, 255, 0.5);
+    border-color: rgba(0, 150, 255, 0.8);
+}
+
+.hud-content {
+    overflow: hidden;
+    transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+    max-height: 500px;
+    opacity: 1;
+}
+
+.hud-content.collapsed {
+    max-height: 0;
+    opacity: 0;
+    margin: 0;
+    padding: 0;
 }
 
 .stat {
@@ -428,6 +472,63 @@ body {
     font-size: 28px;
 }
 
+.command-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #00aa00;
+}
+
+.command-tab {
+    flex: 1;
+    padding: 10px 20px;
+    background: rgba(0, 50, 0, 0.3);
+    border: 2px solid #00aa00;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    color: #00ff00;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.3s;
+}
+
+.command-tab:hover {
+    background: rgba(0, 100, 0, 0.5);
+}
+
+.command-tab.active {
+    background: rgba(0, 150, 0, 0.5);
+    border-color: #00ff00;
+    color: #00ff88;
+}
+
+.command-tab-content {
+    display: block;
+}
+
+.command-tab-content.hidden {
+    display: none;
+}
+
+.store-item {
+    background: rgba(0, 50, 0, 0.3);
+    padding: 15px;
+    border-radius: 8px;
+    border: 2px solid #00aa00;
+    margin-bottom: 15px;
+}
+
+.store-item h3 {
+    color: #00ff00;
+    margin-bottom: 10px;
+    font-size: 20px;
+}
+
+.store-item p {
+    margin: 5px 0;
+    color: #aaa;
+}
+
 #crewInfo {
     background: rgba(0, 100, 0, 0.3);
     padding: 15px;
@@ -668,12 +769,17 @@ body {
         font-size: 16px;
     }
     
-    /* Hide HUD and weapons display on mobile */
+    /* Hide HUD and weapons display on mobile (they have mobile-specific controls) */
     #hud {
         display: none;
     }
     
     #weapons {
+        display: none;
+    }
+    
+    /* Hide HUD toggle on mobile since HUD is hidden */
+    .hud-toggle {
         display: none;
     }
     
