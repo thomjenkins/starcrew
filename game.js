@@ -31,12 +31,90 @@ function initBackground() {
     backgroundImage.src = 'background.png';
 }
 
+// Player ship image
+let playerShipImage = null;
+let playerShipImageLoaded = false;
+
+function initPlayerShipImage() {
+    playerShipImage = new Image();
+    playerShipImage.onload = () => {
+        playerShipImageLoaded = true;
+    };
+    playerShipImage.onerror = () => {
+        console.warn('Failed to load ship.png, using drawn shape');
+        playerShipImageLoaded = false;
+    };
+    playerShipImage.src = 'ship.png';
+}
+
+// Planet images
+let planet1Image = null;
+let planet1ImageLoaded = false;
+let planet2Image = null;
+let planet2ImageLoaded = false;
+
+function initPlanetImages() {
+    // Load planet1.png (start planet)
+    planet1Image = new Image();
+    planet1Image.onload = () => {
+        planet1ImageLoaded = true;
+    };
+    planet1Image.onerror = () => {
+        console.warn('Failed to load planet1.png, using drawn circle');
+        planet1ImageLoaded = false;
+    };
+    planet1Image.src = 'planet1.png';
+    
+    // Load planet2.png (end planet)
+    planet2Image = new Image();
+    planet2Image.onload = () => {
+        planet2ImageLoaded = true;
+    };
+    planet2Image.onerror = () => {
+        console.warn('Failed to load planet2.png, using drawn circle');
+        planet2ImageLoaded = false;
+    };
+    planet2Image.src = 'planet2.png';
+}
+
+// Cargo ship image
+let cargoShipImage = null;
+let cargoShipImageLoaded = false;
+
+function initCargoShipImage() {
+    cargoShipImage = new Image();
+    cargoShipImage.onload = () => {
+        cargoShipImageLoaded = true;
+    };
+    cargoShipImage.onerror = () => {
+        console.warn('Failed to load cargoship.png, using drawn shape');
+        cargoShipImageLoaded = false;
+    };
+    cargoShipImage.src = 'cargoship.png';
+}
+
+// Enemy ship image
+let enemyShipImage = null;
+let enemyShipImageLoaded = false;
+
+function initEnemyShipImage() {
+    enemyShipImage = new Image();
+    enemyShipImage.onload = () => {
+        enemyShipImageLoaded = true;
+    };
+    enemyShipImage.onerror = () => {
+        console.warn('Failed to load enemyship.png, using drawn shape');
+        enemyShipImageLoaded = false;
+    };
+    enemyShipImage.src = 'enemyship.png';
+}
+
 // Player
 let player = {
     x: 0,
     y: 0,
-    width: 40,
-    height: 40,
+    width: 60,  // Increased from 40 for better visibility
+    height: 60, // Increased from 40 for better visibility
     speed: 5,
     health: 100,
     maxHealth: 100,
@@ -126,6 +204,7 @@ let mouseButtonDown = false;
 // Sound System
 let audioContext;
 let soundEnabled = true;
+let backgroundMusic = null;
 
 function initAudio() {
     try {
@@ -134,11 +213,33 @@ function initAudio() {
         console.warn('Web Audio API not supported');
         soundEnabled = false;
     }
+    
+    // Initialize background music
+    backgroundMusic = new Audio('runorhide.mp3');
+    backgroundMusic.loop = true;
+    backgroundMusic.volume = 0.5; // Set volume to 50% so it doesn't overpower sound effects
+    
+    // Handle audio loading errors
+    backgroundMusic.onerror = () => {
+        console.warn('Failed to load background music: runorhide.mp3');
+    };
+    
+    // Try to play music when user interacts (required for autoplay policies)
+    backgroundMusic.oncanplaythrough = () => {
+        // Music is ready, but we'll start it on first user interaction
+    };
 }
 
 function resumeAudioContext() {
     if (audioContext && audioContext.state === 'suspended') {
         audioContext.resume().catch(() => {});
+    }
+    
+    // Start background music on first user interaction (required for autoplay policies)
+    if (backgroundMusic && backgroundMusic.paused) {
+        backgroundMusic.play().catch(err => {
+            console.warn('Could not play background music:', err);
+        });
     }
 }
 
@@ -184,50 +285,163 @@ function playSweep(startFreq, endFreq, duration, volume = 0.2) {
     playSound(endFreq, duration, 'sine', volume, startFreq);
 }
 
-// Sound effects
+// Dubstep-style sound functions
+function playWobble(baseFreq, duration, wobbleRate = 8, wobbleDepth = 0.3, volume = 0.3) {
+    if (!soundEnabled || !audioContext) return;
+    resumeAudioContext();
+    
+    try {
+        const oscillator = audioContext.createOscillator();
+        const lfo = audioContext.createOscillator();
+        const lfoGain = audioContext.createGain();
+        const gainNode = audioContext.createGain();
+        const distortion = audioContext.createWaveShaper();
+        
+        // Create distortion curve for aggressive sound
+        const distortionCurve = new Float32Array(65536);
+        for (let i = 0; i < 65536; i++) {
+            const x = (i - 32768) / 32768;
+            distortionCurve[i] = Math.tanh(x * 3) * 0.5;
+        }
+        distortion.curve = distortionCurve;
+        distortion.oversample = '4x';
+        
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.setValueAtTime(baseFreq, audioContext.currentTime);
+        
+        // LFO for wobble effect
+        lfo.type = 'sine';
+        lfo.frequency.setValueAtTime(wobbleRate, audioContext.currentTime);
+        lfoGain.gain.setValueAtTime(baseFreq * wobbleDepth, audioContext.currentTime);
+        
+        // Connect LFO to modulate oscillator frequency
+        lfo.connect(lfoGain);
+        lfoGain.connect(oscillator.frequency);
+        
+        // Gain envelope
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+        gainNode.gain.linearRampToValueAtTime(volume, audioContext.currentTime + 0.01);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+        
+        oscillator.connect(distortion);
+        distortion.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.start(audioContext.currentTime);
+        lfo.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + duration);
+        lfo.stop(audioContext.currentTime + duration);
+    } catch (e) {
+        // Silently fail
+    }
+}
+
+function playBassDrop(freq, duration, volume = 0.4) {
+    if (!soundEnabled || !audioContext) return;
+    resumeAudioContext();
+    
+    try {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        const distortion = audioContext.createWaveShaper();
+        
+        // Heavy distortion
+        const distortionCurve = new Float32Array(65536);
+        for (let i = 0; i < 65536; i++) {
+            const x = (i - 32768) / 32768;
+            distortionCurve[i] = Math.tanh(x * 5) * 0.6;
+        }
+        distortion.curve = distortionCurve;
+        distortion.oversample = '4x';
+        
+        oscillator.type = 'square';
+        oscillator.frequency.setValueAtTime(freq, audioContext.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(freq * 0.3, audioContext.currentTime + duration);
+        
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+        gainNode.gain.linearRampToValueAtTime(volume, audioContext.currentTime + 0.02);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+        
+        oscillator.connect(distortion);
+        distortion.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + duration);
+    } catch (e) {
+        // Silently fail
+    }
+}
+
+function playDubstepBeep(frequency, duration, volume = 0.2) {
+    if (!soundEnabled || !audioContext) return;
+    resumeAudioContext();
+    
+    try {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.type = 'square';
+        oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+        
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+        gainNode.gain.linearRampToValueAtTime(volume, audioContext.currentTime + 0.005);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + duration);
+    } catch (e) {
+        // Silently fail
+    }
+}
+
+// Dubstep-style sound effects
 const sounds = {
     primaryShot: () => {
-        playBeep(800, 0.05, 0.15);
-        playBeep(1000, 0.03, 0.1);
+        playDubstepBeep(200, 0.08, 0.2);
+        playDubstepBeep(250, 0.05, 0.15);
     },
     missileLaunch: () => {
-        playSweep(200, 400, 0.2, 0.25);
-        playBeep(300, 0.1, 0.15);
+        playWobble(60, 0.25, 12, 0.4, 0.3);
+        playBassDrop(80, 0.15, 0.25);
     },
     laserShot: () => {
-        playTone(1200, 0.15, 'sawtooth', 0.2);
-        playBeep(1500, 0.1, 0.15);
+        playTone(150, 0.12, 'sawtooth', 0.25);
+        playWobble(100, 0.1, 15, 0.3, 0.2);
     },
     enemyExplosion: () => {
-        playTone(100, 0.3, 'sawtooth', 0.3);
-        playSweep(200, 50, 0.2, 0.2);
-        playBeep(150, 0.1, 0.15);
+        playBassDrop(50, 0.4, 0.4);
+        playWobble(40, 0.3, 10, 0.5, 0.3);
+        playTone(60, 0.2, 'square', 0.25);
     },
     asteroidExplosion: () => {
-        playTone(80, 0.4, 'sawtooth', 0.25);
-        playSweep(150, 40, 0.3, 0.15);
+        playBassDrop(45, 0.5, 0.35);
+        playWobble(35, 0.4, 8, 0.6, 0.25);
     },
     playerHit: () => {
-        playTone(200, 0.2, 'square', 0.4);
-        playBeep(150, 0.15, 0.3);
+        playBassDrop(70, 0.25, 0.4);
+        playTone(90, 0.15, 'square', 0.3);
     },
     powerupCollect: () => {
-        playSweep(400, 800, 0.3, 0.25);
-        playBeep(600, 0.1, 0.2);
-        playBeep(800, 0.1, 0.15);
+        playWobble(80, 0.2, 20, 0.3, 0.3);
+        setTimeout(() => playWobble(100, 0.15, 25, 0.3, 0.25), 100);
+        setTimeout(() => playWobble(120, 0.1, 30, 0.3, 0.2), 200);
     },
     enemyShot: () => {
-        playBeep(400, 0.08, 0.15);
-        playBeep(350, 0.05, 0.1);
+        playDubstepBeep(120, 0.1, 0.2);
+        playDubstepBeep(100, 0.08, 0.15);
     },
     levelUp: () => {
-        playSweep(300, 600, 0.2, 0.3);
-        setTimeout(() => playSweep(400, 800, 0.2, 0.3), 100);
-        setTimeout(() => playSweep(500, 1000, 0.2, 0.3), 200);
+        playBassDrop(60, 0.3, 0.35);
+        setTimeout(() => playWobble(80, 0.25, 15, 0.4, 0.3), 100);
+        setTimeout(() => playBassDrop(100, 0.2, 0.3), 200);
     },
     allyShot: () => {
-        playBeep(600, 0.06, 0.12);
-        playBeep(700, 0.04, 0.08);
+        playDubstepBeep(180, 0.08, 0.18);
+        playDubstepBeep(200, 0.06, 0.12);
     }
 };
 
@@ -275,11 +489,49 @@ const crewEffects = {
     navigation: { speedBonus: 0.05 } // 5% speed per crew
 };
 
+// Display dimensions (for game logic - these are in display pixels)
+let displayWidth = window.innerWidth;
+let displayHeight = window.innerHeight;
+
+// Function to set up canvas with proper device pixel ratio for high-DPI displays
+function setupCanvas() {
+    if (!canvas) return;
+    
+    // Get device pixel ratio (1 for normal displays, 2+ for Retina/high-DPI)
+    const dpr = window.devicePixelRatio || 1;
+    
+    // Get display size
+    displayWidth = window.innerWidth;
+    displayHeight = window.innerHeight;
+    
+    // Set canvas internal resolution (actual pixels)
+    canvas.width = displayWidth * dpr;
+    canvas.height = displayHeight * dpr;
+    
+    // Set canvas CSS size (display size)
+    canvas.style.width = displayWidth + 'px';
+    canvas.style.height = displayHeight + 'px';
+    
+    // Scale context to match device pixel ratio
+    ctx.scale(dpr, dpr);
+}
+
+// Helper functions to get display dimensions (for game logic)
+function getCanvasWidth() {
+    return displayWidth;
+}
+
+function getCanvasHeight() {
+    return displayHeight;
+}
+
 // Event listeners
     window.addEventListener('resize', () => {
         if (canvas) {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+            setupCanvas();
+            // Reinitialize player position after resize
+            if (isNaN(player.x)) player.x = getCanvasWidth() / 2;
+            if (isNaN(player.y)) player.y = getCanvasHeight() - 100;
         }
     });
 
@@ -405,11 +657,11 @@ function drawStarfield() {
     // Draw background image if loaded, otherwise black background
     if (backgroundImageLoaded && backgroundImage) {
         // Draw background image, scaled to cover the canvas
-        ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(backgroundImage, 0, 0, getCanvasWidth(), getCanvasHeight());
     } else {
         // Fallback to black background
         ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, getCanvasWidth(), getCanvasHeight());
     }
 }
 
@@ -420,7 +672,7 @@ function drawGameTitle() {
     ctx.save();
     
     const title = "Star Crew";
-    const fontSize = Math.max(60, canvas.width / 15);
+    const fontSize = Math.max(60, getCanvasWidth() / 15);
     
     // Set font
     ctx.font = `bold ${fontSize}px Arial, sans-serif`;
@@ -428,8 +680,8 @@ function drawGameTitle() {
     ctx.textBaseline = 'middle';
     
     // Draw title with glow effect
-    const x = canvas.width / 2;
-    const y = canvas.height / 2;
+    const x = getCanvasWidth() / 2;
+    const y = getCanvasHeight() / 2;
     
     // Outer glow
     ctx.shadowBlur = 30;
@@ -463,8 +715,8 @@ function updatePlayer() {
     if (!canvas || !player || gameState.paused) return;
     
     // Ensure player position is valid
-    if (isNaN(player.x)) player.x = canvas.width / 2;
-    if (isNaN(player.y)) player.y = canvas.height - 100;
+    if (isNaN(player.x)) player.x = getCanvasWidth() / 2;
+    if (isNaN(player.y)) player.y = getCanvasHeight() - 100;
     
     // Apply navigation crew effect
     const speedMultiplier = 1 + (crewAllocation.navigation.length * crewEffects.navigation.speedBonus);
@@ -506,31 +758,11 @@ function updatePlayer() {
         if (keys['d']) {
             player.rotation += player.rotationSpeed;
         }
-        
-        // Mouse/trackpad rotation (only if mouse is active and button is NOT held down)
-        if (mouseActive && mouseX >= 0 && mouseY >= 0 && mouseX <= canvas.width && mouseY <= canvas.height && !mouseButtonDown) {
-            const dx = mouseX - player.x;
-            const dy = mouseY - player.y;
-            const targetAngle = Math.atan2(dx, -dy); // atan2(dx, -dy) because ship points up at rotation 0
-            let angleDiff = targetAngle - player.rotation;
-            
-            // Normalize angle difference to [-PI, PI]
-            while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-            while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-            
-            // Smoothly rotate toward target angle
-            const maxRotationPerFrame = player.rotationSpeed * 2; // Allow faster rotation when following cursor
-            if (Math.abs(angleDiff) > maxRotationPerFrame) {
-                player.rotation += Math.sign(angleDiff) * maxRotationPerFrame;
-            } else {
-                player.rotation = targetAngle; // Snap to target when close
-            }
-        }
     }
     
     // Movement logic - works regardless of tractor beam state
     // Mouse/trackpad control (takes priority if active)
-    if (mouseActive && mouseX >= 0 && mouseY >= 0 && mouseX <= canvas.width && mouseY <= canvas.height) {
+    if (mouseActive && mouseX >= 0 && mouseY >= 0 && mouseX <= getCanvasWidth() && mouseY <= getCanvasHeight()) {
         const dx = mouseX - player.x;
         const dy = mouseY - player.y;
         const distance = Math.hypot(dx, dy);
@@ -543,9 +775,27 @@ function updatePlayer() {
             player.x += (dx / distance) * moveDistance;
             player.y += (dy / distance) * moveDistance;
             
+            // Rotate toward movement direction when moving (only when actually moving, not at rest)
+            if (!mouseButtonDown) {
+                const targetAngle = Math.atan2(dx, -dy); // atan2(dx, -dy) because ship points up at rotation 0
+                let angleDiff = targetAngle - player.rotation;
+                
+                // Normalize angle difference to [-PI, PI]
+                while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+                
+                // Smoothly rotate toward target angle
+                const maxRotationPerFrame = player.rotationSpeed * 2; // Allow faster rotation when following cursor
+                if (Math.abs(angleDiff) > maxRotationPerFrame) {
+                    player.rotation += Math.sign(angleDiff) * maxRotationPerFrame;
+                } else {
+                    player.rotation = targetAngle; // Snap to target when close
+                }
+            }
+            
             // Keep player within bounds
-            player.x = Math.max(player.width / 2, Math.min(canvas.width - player.width / 2, player.x));
-            player.y = Math.max(player.height / 2, Math.min(canvas.height - player.height / 2, player.y));
+            player.x = Math.max(player.width / 2, Math.min(getCanvasWidth() - player.width / 2, player.x));
+            player.y = Math.max(player.height / 2, Math.min(getCanvasHeight() - player.height / 2, player.y));
         }
     } else {
         // Keyboard control
@@ -568,13 +818,13 @@ function updatePlayer() {
         wasMoving = wasMoving || keys['arrowup'] || keys['arrowdown'] || keys['arrowleft'] || keys['arrowright'];
         
         if (keys['arrowup']) player.y = Math.max(player.height / 2, player.y - effectiveSpeed);
-        if (keys['arrowdown']) player.y = Math.min(canvas.height - player.height / 2, player.y + effectiveSpeed);
+        if (keys['arrowdown']) player.y = Math.min(getCanvasHeight() - player.height / 2, player.y + effectiveSpeed);
         if (keys['arrowleft']) player.x = Math.max(player.width / 2, player.x - effectiveSpeed);
-        if (keys['arrowright']) player.x = Math.min(canvas.width - player.width / 2, player.x + effectiveSpeed);
+        if (keys['arrowright']) player.x = Math.min(getCanvasWidth() - player.width / 2, player.x + effectiveSpeed);
         
         // Keep player within bounds (for WASD movement)
-        player.x = Math.max(player.width / 2, Math.min(canvas.width - player.width / 2, player.x));
-        player.y = Math.max(player.height / 2, Math.min(canvas.height - player.height / 2, player.y));
+        player.x = Math.max(player.width / 2, Math.min(getCanvasWidth() - player.width / 2, player.x));
+        player.y = Math.max(player.height / 2, Math.min(getCanvasHeight() - player.height / 2, player.y));
     }
 
     // Engine glow effect
@@ -842,8 +1092,8 @@ function updateBullets() {
             return false;
         }
 
-        return bullet.y > -20 && bullet.y < canvas.height + 20 && 
-               bullet.x > -20 && bullet.x < canvas.width + 20;
+        return bullet.y > -20 && bullet.y < getCanvasHeight() + 20 && 
+               bullet.x > -20 && bullet.x < getCanvasWidth() + 20;
     });
 }
 
@@ -868,26 +1118,26 @@ function spawnEnemy() {
         
         switch(edge) {
             case 0: // Top
-                x = Math.max(30, Math.min(canvas.width - 30, Math.random() * canvas.width + edgeOffset));
+                x = Math.max(30, Math.min(getCanvasWidth() - 30, Math.random() * getCanvasWidth() + edgeOffset));
                 y = -30;
                 vx = (Math.random() - 0.5) * 1;
                 vy = 0.5 + Math.random() * 0.5;
                 break;
             case 1: // Right
-                x = canvas.width + 30;
-                y = Math.max(30, Math.min(canvas.height - 30, Math.random() * canvas.height + edgeOffset));
+                x = getCanvasWidth() + 30;
+                y = Math.max(30, Math.min(getCanvasHeight() - 30, Math.random() * getCanvasHeight() + edgeOffset));
                 vx = -(0.5 + Math.random() * 0.5);
                 vy = (Math.random() - 0.5) * 1;
                 break;
             case 2: // Bottom
-                x = Math.max(30, Math.min(canvas.width - 30, Math.random() * canvas.width + edgeOffset));
-                y = canvas.height + 30;
+                x = Math.max(30, Math.min(getCanvasWidth() - 30, Math.random() * getCanvasWidth() + edgeOffset));
+                y = getCanvasHeight() + 30;
                 vx = (Math.random() - 0.5) * 1;
                 vy = -(0.5 + Math.random() * 0.5);
                 break;
             case 3: // Left
                 x = -30;
-                y = Math.max(30, Math.min(canvas.height - 30, Math.random() * canvas.height + edgeOffset));
+                y = Math.max(30, Math.min(getCanvasHeight() - 30, Math.random() * getCanvasHeight() + edgeOffset));
                 vx = 0.5 + Math.random() * 0.5;
                 vy = (Math.random() - 0.5) * 1;
                 break;
@@ -922,16 +1172,16 @@ function spawnEnemy() {
         height: 30 + Math.random() * 20,
         vx: vx,
         vy: vy,
-        health: 30 + creditDifficulty * 8,
-        maxHealth: 30 + creditDifficulty * 8,
+        health: 20 + creditDifficulty * 8, // Reduced from 30 to 20 at start
+        maxHealth: 20 + creditDifficulty * 8,
         color: `hsl(${hue}, 70%, 50%)`,
         glowColor: `hsl(${hue}, 100%, 60%)`,
-        shootCooldown: Math.max(40, 90 - creditDifficulty * 2),
-        damage: 10 + creditDifficulty * 1.5,
+        shootCooldown: Math.max(40, 150 - creditDifficulty * 2), // Increased from 90 to 150 at start
+        damage: 6 + creditDifficulty * 1.5, // Reduced from 10 to 6 at start
         rotation: 0, // Will be set based on target direction
         targetRotation: 0, // Target rotation for smooth interpolation
         lastNebulaDamageTime: 0,
-        pursuitSpeed: 0.5 + difficulty * 0.3, // Speed for pursuing targets
+        pursuitSpeed: 0.4 + difficulty * 0.3, // Reduced from 0.5 to 0.4 at start
         targetType: null, // 'player', 'cargo', or 'ally'
         targetSwitchCooldown: 0, // Cooldown before switching targets
         circleDirection: Math.random() < 0.5 ? 1 : -1 // Consistent circling direction (clockwise or counter-clockwise)
@@ -945,7 +1195,7 @@ function spawnAsteroid() {
     const creditDifficulty = cumulativeCredits / 100;
     const difficulty = creditDifficulty * 0.05; // More gradual speed increase
     asteroids.push({
-        x: Math.random() * canvas.width,
+        x: Math.random() * getCanvasWidth(),
         y: -size,
         width: size,
         height: size,
@@ -983,29 +1233,45 @@ function spawnNebula() {
     
     switch(edge) {
         case 0: // Top
-            x = Math.random() * canvas.width;
+            x = Math.random() * getCanvasWidth();
             y = -size / 2;
             vx = (Math.random() - 0.5) * 0.5;
             vy = 0.3 + Math.random() * 0.3; // Move downward
             break;
         case 1: // Right
-            x = canvas.width + size / 2;
-            y = Math.random() * canvas.height;
+            x = getCanvasWidth() + size / 2;
+            y = Math.random() * getCanvasHeight();
             vx = -(0.3 + Math.random() * 0.3); // Move leftward
             vy = (Math.random() - 0.5) * 0.5;
             break;
         case 2: // Bottom
-            x = Math.random() * canvas.width;
-            y = canvas.height + size / 2;
+            x = Math.random() * getCanvasWidth();
+            y = getCanvasHeight() + size / 2;
             vx = (Math.random() - 0.5) * 0.5;
             vy = -(0.3 + Math.random() * 0.3); // Move upward
             break;
         case 3: // Left
             x = -size / 2;
-            y = Math.random() * canvas.height;
+            y = Math.random() * getCanvasHeight();
             vx = 0.3 + Math.random() * 0.3; // Move rightward
             vy = (Math.random() - 0.5) * 0.5;
             break;
+    }
+    
+    // Generate cloud blobs for morphing cloud shape
+    const cloudBlobs = [];
+    const blobCount = 8 + Math.floor(Math.random() * 8); // 8-15 blobs
+    for (let i = 0; i < blobCount; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = (Math.random() * 0.6 + 0.2) * size / 2; // Random distance from center
+        cloudBlobs.push({
+            x: Math.cos(angle) * dist,
+            y: Math.sin(angle) * dist,
+            radius: size * (0.15 + Math.random() * 0.25), // Varying blob sizes
+            vx: (Math.random() - 0.5) * 0.3, // Slow drift velocity
+            vy: (Math.random() - 0.5) * 0.3,
+            phase: Math.random() * Math.PI * 2 // For morphing animation
+        });
     }
     
     nebulas.push({
@@ -1021,7 +1287,9 @@ function spawnNebula() {
         glowColor: `hsl(${hue}, 100%, 70%)`,
         damagePerSecond: 2 + (cumulativeCredits / 100) * 0.5, // Scale with cumulative credits
         lastPlayerDamageTime: 0,
-        lastCargoDamageTime: 0
+        lastCargoDamageTime: 0,
+        cloudBlobs: cloudBlobs,
+        morphTime: Math.random() * Math.PI * 2 // Starting phase for morphing
     });
 }
 
@@ -1035,22 +1303,57 @@ function updateNebulas() {
         nebula.y += nebula.vy;
         nebula.rotation += nebula.rotationSpeed;
         
+        // Morph cloud blobs over time
+        if (nebula.morphTime !== undefined) {
+            nebula.morphTime += 0.01; // Slow morphing animation
+        } else {
+            nebula.morphTime = Math.random() * Math.PI * 2; // Initialize if missing
+        }
+        
+        if (nebula.cloudBlobs) {
+            nebula.cloudBlobs.forEach(blob => {
+                // Update blob position with slow drift and morphing
+                blob.x += blob.vx * 0.1;
+                blob.y += blob.vy * 0.1;
+                
+                // Add morphing motion using sine waves
+                const morphX = Math.sin(nebula.morphTime + blob.phase) * 2;
+                const morphY = Math.cos(nebula.morphTime * 0.7 + blob.phase) * 2;
+                blob.x += morphX * 0.1;
+                blob.y += morphY * 0.1;
+                
+                // Keep blobs within reasonable bounds (soft constraint)
+                const distFromCenter = Math.sqrt(blob.x * blob.x + blob.y * blob.y);
+                const maxDist = nebula.width / 2 * 1.2;
+                if (distFromCenter > maxDist) {
+                    // Gently pull back toward center
+                    blob.x *= 0.95;
+                    blob.y *= 0.95;
+                }
+                
+                // Slight size variation for more organic feel
+                const baseRadius = nebula.width * (0.15 + (blob.radius / nebula.width - 0.15) * 0.5);
+                blob.radius = baseRadius + Math.sin(nebula.morphTime * 0.5 + blob.phase) * (nebula.width * 0.05);
+                blob.radius = Math.max(nebula.width * 0.1, Math.min(nebula.width * 0.4, blob.radius));
+            });
+        }
+        
         // Remove nebula if it goes completely off screen (opposite side from where it entered)
         const margin = nebula.width;
-        if (nebula.x < -margin || nebula.x > canvas.width + margin ||
-            nebula.y < -margin || nebula.y > canvas.height + margin) {
+        if (nebula.x < -margin || nebula.x > getCanvasWidth() + margin ||
+            nebula.y < -margin || nebula.y > getCanvasHeight() + margin) {
             return false; // Remove this nebula
         }
         
         // Keep nebula in bounds (but allow it to drift off screen)
         // Only constrain if it's trying to go back the way it came
-        if (nebula.vx > 0 && nebula.x > canvas.width - nebula.width / 2) {
+        if (nebula.vx > 0 && nebula.x > getCanvasWidth() - nebula.width / 2) {
             nebula.vx *= -0.5; // Slow down and reverse slightly
         }
         if (nebula.vx < 0 && nebula.x < nebula.width / 2) {
             nebula.vx *= -0.5;
         }
-        if (nebula.vy > 0 && nebula.y > canvas.height - nebula.height / 2) {
+        if (nebula.vy > 0 && nebula.y > getCanvasHeight() - nebula.height / 2) {
             nebula.vy *= -0.5;
         }
         if (nebula.vy < 0 && nebula.y < nebula.height / 2) {
@@ -1138,6 +1441,30 @@ function updateNebulas() {
     }
 }
 
+// Helper function to convert HSL to RGBA
+function hslToRgba(hsl, alpha) {
+    if (hsl && hsl.startsWith('hsl')) {
+        const match = hsl.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+        if (match) {
+            const h = parseInt(match[1]) / 360;
+            const s = parseInt(match[2]) / 100;
+            const l = parseInt(match[3]) / 100;
+            const c = (1 - Math.abs(2 * l - 1)) * s;
+            const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+            const m = l - c / 2;
+            let r, g, b;
+            if (h < 1/6) { r = c; g = x; b = 0; }
+            else if (h < 2/6) { r = x; g = c; b = 0; }
+            else if (h < 3/6) { r = 0; g = c; b = x; }
+            else if (h < 4/6) { r = 0; g = x; b = c; }
+            else if (h < 5/6) { r = x; g = 0; b = c; }
+            else { r = c; g = 0; b = x; }
+            return `rgba(${Math.round((r + m) * 255)}, ${Math.round((g + m) * 255)}, ${Math.round((b + m) * 255)}, ${alpha})`;
+        }
+    }
+    return hsl || `rgba(255, 255, 255, ${alpha})`; // Fallback
+}
+
 // Draw nebulas
 function drawNebulas() {
     nebulas.forEach(nebula => {
@@ -1145,51 +1472,97 @@ function drawNebulas() {
         ctx.translate(nebula.x, nebula.y);
         ctx.rotate(nebula.rotation);
         
-        // Create gradient for nebula
-        const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, nebula.width / 2);
-        gradient.addColorStop(0, nebula.glowColor);
-        gradient.addColorStop(0.3, nebula.color);
-        gradient.addColorStop(0.7, hexToRgba(nebula.color, 0.5));
-        gradient.addColorStop(1, hexToRgba(nebula.color, 0));
-        
-        // Outer glow
-        ctx.shadowBlur = 30;
+        // Draw morphing cloud shape using multiple overlapping blobs
+        if (nebula.cloudBlobs && nebula.cloudBlobs.length > 0) {
+            // Use composite operation for smooth blending
+            ctx.globalCompositeOperation = 'screen';
+            
+            // Draw each cloud blob with soft gradients
+            nebula.cloudBlobs.forEach((blob, index) => {
+                // Create radial gradient for each blob
+                const blobGradient = ctx.createRadialGradient(
+                    blob.x, blob.y, 0,
+                    blob.x, blob.y, blob.radius
+                );
+                
+                // Vary opacity and color intensity based on blob position and index
+                const distFromCenter = Math.sqrt(blob.x * blob.x + blob.y * blob.y);
+                const normalizedDist = distFromCenter / (nebula.width / 2);
+                const opacity = (1 - normalizedDist * 0.5) * 0.8; // Fade out at edges
+                
+                // Inner glow (brighter)
+                blobGradient.addColorStop(0, hslToRgba(nebula.glowColor, opacity * 0.9));
+                blobGradient.addColorStop(0.3, hslToRgba(nebula.color, opacity * 0.7));
+                blobGradient.addColorStop(0.6, hslToRgba(nebula.color, opacity * 0.4));
+                blobGradient.addColorStop(1, hslToRgba(nebula.color, 0));
+                
+                ctx.fillStyle = blobGradient;
+                ctx.shadowBlur = 20;
         ctx.shadowColor = nebula.glowColor;
-        ctx.fillStyle = gradient;
+                
+                // Draw blob as soft circle
         ctx.beginPath();
-        ctx.ellipse(0, 0, nebula.width / 2, nebula.height / 2, 0, 0, Math.PI * 2);
+                ctx.arc(blob.x, blob.y, blob.radius, 0, Math.PI * 2);
         ctx.fill();
-        
-        // Inner core
-        ctx.shadowBlur = 0;
-        const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, nebula.width / 4);
+            });
+            
+            // Draw additional smaller wisps for more detail
+            ctx.globalAlpha = 0.4;
+            nebula.cloudBlobs.forEach(blob => {
+                // Add smaller wisps around each main blob
+                for (let i = 0; i < 2; i++) {
+                    const wispAngle = nebula.morphTime * 0.3 + blob.phase + i * Math.PI;
+                    const wispDist = blob.radius * 0.6;
+                    const wispX = blob.x + Math.cos(wispAngle) * wispDist;
+                    const wispY = blob.y + Math.sin(wispAngle) * wispDist;
+                    const wispRadius = blob.radius * 0.4;
+                    
+                    const wispGradient = ctx.createRadialGradient(
+                        wispX, wispY, 0,
+                        wispX, wispY, wispRadius
+                    );
+                    wispGradient.addColorStop(0, hslToRgba(nebula.color, 0.5));
+                    wispGradient.addColorStop(1, hslToRgba(nebula.color, 0));
+                    
+                    ctx.fillStyle = wispGradient;
+                    ctx.beginPath();
+                    ctx.arc(wispX, wispY, wispRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            
+            // Draw bright core in center
+            ctx.globalAlpha = 1;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.shadowBlur = 30;
+            ctx.shadowColor = nebula.glowColor;
+            const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, nebula.width / 6);
         coreGradient.addColorStop(0, '#ffffff');
-        coreGradient.addColorStop(0.5, nebula.glowColor);
+            coreGradient.addColorStop(0.4, nebula.glowColor);
         coreGradient.addColorStop(1, 'transparent');
         ctx.fillStyle = coreGradient;
         ctx.beginPath();
-        ctx.ellipse(0, 0, nebula.width / 4, nebula.height / 4, 0, 0, Math.PI * 2);
+            ctx.arc(0, 0, nebula.width / 6, 0, Math.PI * 2);
         ctx.fill();
-        
-        // Add some wispy clouds
-        ctx.globalAlpha = 0.3;
-        for (let i = 0; i < 5; i++) {
-            const angle = (i / 5) * Math.PI * 2 + nebula.rotation;
-            const dist = nebula.width / 3;
-            const cloudX = Math.cos(angle) * dist;
-            const cloudY = Math.sin(angle) * dist;
-            const cloudSize = nebula.width / 6;
+        } else {
+            // Fallback for old nebulas without cloud blobs (backward compatibility)
+            const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, nebula.width / 2);
+            gradient.addColorStop(0, nebula.glowColor);
+            gradient.addColorStop(0.3, nebula.color);
+            gradient.addColorStop(0.7, hexToRgba(nebula.color, 0.5));
+            gradient.addColorStop(1, hexToRgba(nebula.color, 0));
             
-            const cloudGradient = ctx.createRadialGradient(cloudX, cloudY, 0, cloudX, cloudY, cloudSize);
-            cloudGradient.addColorStop(0, hexToRgba(nebula.color, 0.6));
-            cloudGradient.addColorStop(1, 'transparent');
-            ctx.fillStyle = cloudGradient;
+            ctx.shadowBlur = 30;
+            ctx.shadowColor = nebula.glowColor;
+            ctx.fillStyle = gradient;
             ctx.beginPath();
-            ctx.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
+            ctx.ellipse(0, 0, nebula.width / 2, nebula.height / 2, 0, 0, Math.PI * 2);
             ctx.fill();
         }
-        ctx.globalAlpha = 1;
         
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.shadowBlur = 0;
         ctx.restore();
     });
 }
@@ -1340,15 +1713,10 @@ function updateEnemies() {
         enemy.x += enemy.vx;
         enemy.y += enemy.vy;
         
-        // Orient enemy toward target (pointy end faces target)
-        // Calculate angle to target
-        const angleToTarget = Math.atan2(dy, dx);
-        // Enemy shape: pointy end is at (0, enemy.height/2) which is the bottom in rotated coords
-        // At rotation 0, the ship's bottom (pointy end) points down (positive Y = Math.PI/2)
-        // To make the pointy end point toward the target, we need to rotate so that
-        // the bottom point (which is at angle Math.PI/2 when rotation=0) aligns with angleToTarget
-        // So: rotation = angleToTarget - Math.PI/2
-        enemy.targetRotation = angleToTarget - Math.PI / 2;
+        // Orient enemy toward target (ship faces target)
+        // Enemy ship image points up when rotation = 0 (like player ship)
+        // Use same rotation calculation as player: Math.atan2(dx, -dy)
+        enemy.targetRotation = Math.atan2(dx, -dy);
         
         // Smoothly interpolate rotation to prevent flickering
         let angleDiff = enemy.targetRotation - enemy.rotation;
@@ -1369,15 +1737,15 @@ function updateEnemies() {
         if (enemy.x < margin) {
             enemy.x = margin;
             enemy.vx = Math.abs(enemy.vx) * 0.5; // Bounce
-        } else if (enemy.x > canvas.width - margin) {
-            enemy.x = canvas.width - margin;
+        } else if (enemy.x > getCanvasWidth() - margin) {
+            enemy.x = getCanvasWidth() - margin;
             enemy.vx = -Math.abs(enemy.vx) * 0.5; // Bounce
         }
         if (enemy.y < margin) {
             enemy.y = margin;
             enemy.vy = Math.abs(enemy.vy) * 0.5; // Bounce
-        } else if (enemy.y > canvas.height - margin) {
-            enemy.y = canvas.height - margin;
+        } else if (enemy.y > getCanvasHeight() - margin) {
+            enemy.y = getCanvasHeight() - margin;
             enemy.vy = -Math.abs(enemy.vy) * 0.5; // Bounce
         }
         
@@ -1533,7 +1901,7 @@ function updateAsteroids() {
             return false;
         }
 
-        return asteroid.y < canvas.height + 50;
+        return asteroid.y < getCanvasHeight() + 50;
     });
 }
 
@@ -1936,6 +2304,7 @@ function updateEnemyBullets() {
             if (index > -1) {
                 bullets.splice(index, 1);
             }
+            return; // Skip other checks if hit player
         }
         
         // Check collision with cargo vessel in mission mode
@@ -1945,6 +2314,29 @@ function updateEnemyBullets() {
             const index = bullets.indexOf(bullet);
             if (index > -1) {
                 bullets.splice(index, 1);
+            }
+            return; // Skip other checks if hit cargo vessel
+        }
+        
+        // Check collision with allies
+        for (let i = 0; i < allies.length; i++) {
+            const ally = allies[i];
+            if (checkCollision(bullet, ally)) {
+                ally.health -= bullet.damage;
+                createExplosion(bullet.x, bullet.y, 10);
+                
+                // Check if ally is destroyed
+                if (ally.health <= 0) {
+                    createExplosion(ally.x, ally.y, 25);
+                    allies.splice(i, 1);
+                }
+                
+                // Remove the bullet
+                const index = bullets.indexOf(bullet);
+                if (index > -1) {
+                    bullets.splice(index, 1);
+                }
+                return; // Exit loop and skip other checks
             }
         }
     });
@@ -2088,7 +2480,19 @@ function drawPlayer() {
         }
     }
 
-    // Ship body with gradient
+    // Draw ship image if loaded, otherwise fall back to drawn shape
+    if (playerShipImageLoaded && playerShipImage) {
+        // Draw ship image, centered and rotated
+        // Image should point up when rotation is 0
+        ctx.drawImage(
+            playerShipImage,
+            -player.width / 2,  // X position (centered)
+            -player.height / 2, // Y position (centered)
+            player.width,       // Width
+            player.height       // Height
+        );
+    } else {
+        // Fallback: Draw ship shape if image not loaded
     const shipGradient = ctx.createLinearGradient(-player.width / 2, -player.height / 2, 0, player.height / 2);
     shipGradient.addColorStop(0, '#0066aa');
     shipGradient.addColorStop(0.5, '#00aaff');
@@ -2120,6 +2524,7 @@ function drawPlayer() {
     ctx.lineTo(player.width / 2, player.height / 2);
     ctx.closePath();
     ctx.stroke();
+    }
     
     ctx.restore();
 }
@@ -2235,7 +2640,18 @@ function drawEnemies() {
         ctx.shadowBlur = 15;
         ctx.shadowColor = enemy.glowColor;
         
-        // Enemy ship with gradient
+        // Draw enemy ship image if loaded, otherwise fall back to drawn shape
+        if (enemyShipImageLoaded && enemyShipImage) {
+            // Draw enemy ship image, centered
+            ctx.drawImage(
+                enemyShipImage,
+                -enemy.width / 2,  // X position (centered)
+                -enemy.height / 2, // Y position (centered)
+                enemy.width,       // Width
+                enemy.height       // Height
+            );
+        } else {
+            // Fallback: Draw enemy ship shape if image not loaded
         const enemyGradient = ctx.createLinearGradient(-enemy.width / 2, -enemy.height / 2, 0, enemy.height / 2);
         enemyGradient.addColorStop(0, enemy.color);
         enemyGradient.addColorStop(1, enemy.color.replace('50%)', '30%)'));
@@ -2262,6 +2678,7 @@ function drawEnemies() {
         ctx.lineTo(enemy.width / 2, -enemy.height / 2);
         ctx.closePath();
         ctx.stroke();
+        }
         
         ctx.restore();
     });
@@ -2528,16 +2945,16 @@ function initMissionMode() {
     // Create start planet (left side)
     startPlanet = {
         x: 50,
-        y: canvas.height / 2,
-        radius: 40,
+        y: getCanvasHeight() / 2,
+        radius: 80,  // Doubled from 40
         color: '#4a90e2'
     };
     
     // Create end planet (right side)
     endPlanet = {
-        x: canvas.width - 50,
-        y: canvas.height / 2,
-        radius: 40,
+        x: getCanvasWidth() - 50,
+        y: getCanvasHeight() / 2,
+        radius: 80,  // Doubled from 40
         color: '#e24a4a'
     };
     
@@ -2550,7 +2967,7 @@ function initMissionMode() {
     
     // Create cargo vessel with calculated speed for fixed journey time
     cargoVessel = {
-        x: startPlanet.x + 50, // Start slightly to the right of start planet
+        x: startPlanet.x + 80, // Start slightly to the right of start planet (adjusted for larger planet)
         y: startPlanet.y,
         width: 60,
         height: 40,
@@ -2558,13 +2975,13 @@ function initMissionMode() {
         health: 200,
         maxHealth: 200,
         progress: 0,
-        targetX: endPlanet.x - 50, // Target slightly to the left of end planet
+        targetX: endPlanet.x - 80, // Target slightly to the left of end planet (adjusted for larger planet)
         targetY: endPlanet.y,
         direction: 1, // 1 = going right, -1 = going left
         journeyComplete: false,
         journeyTime: 0,
         maxJourneyTime: baseJourneyTimeFrames, // Fixed journey time in frames
-        distance: distance - 100 // Distance to travel (minus planet radii)
+        distance: distance - 160 // Distance to travel (minus planet radii, adjusted for larger planets)
     };
     
     // Calculate base speed to complete journey in fixed time
@@ -2603,15 +3020,15 @@ function updateCargoVessel() {
         cargoVessel.direction *= -1;
         if (cargoVessel.direction === 1) {
             // Going right (towards end planet)
-            cargoVessel.targetX = endPlanet.x - 50;
+            cargoVessel.targetX = endPlanet.x - 80;
             cargoVessel.targetY = endPlanet.y;
-            cargoVessel.x = startPlanet.x + 50;
+            cargoVessel.x = startPlanet.x + 80;
             cargoVessel.y = startPlanet.y;
         } else {
             // Going left (towards start planet)
-            cargoVessel.targetX = startPlanet.x + 50;
+            cargoVessel.targetX = startPlanet.x + 80;
             cargoVessel.targetY = startPlanet.y;
-            cargoVessel.x = endPlanet.x - 50;
+            cargoVessel.x = endPlanet.x - 80;
             cargoVessel.y = endPlanet.y;
         }
         cargoVessel.journeyComplete = true;
@@ -2646,7 +3063,7 @@ function drawCargoVessel() {
     ctx.save();
     ctx.translate(cargoVessel.x, cargoVessel.y);
     
-    // Health bar
+    // Health bar (drawn before rotation so it stays upright)
     const healthPercent = cargoVessel.health / cargoVessel.maxHealth;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(-cargoVessel.width / 2 - 5, -cargoVessel.height / 2 - 15, cargoVessel.width + 10, 8);
@@ -2655,7 +3072,27 @@ function drawCargoVessel() {
     ctx.fillStyle = 'green';
     ctx.fillRect(-cargoVessel.width / 2 - 3, -cargoVessel.height / 2 - 13, (cargoVessel.width + 6) * healthPercent, 4);
     
-    // Cargo vessel body
+    // Rotate to orient ship horizontally based on direction
+    // direction === 1: going right (towards end planet) - rotate 90 degrees
+    // direction === -1: going left (towards start planet) - rotate 270 degrees (or -90 degrees) to face left
+    if (cargoVessel.direction === 1) {
+        ctx.rotate(Math.PI / 2); // 90 degrees - points right
+    } else {
+        ctx.rotate(-Math.PI / 2); // -90 degrees (or 270 degrees) - points left
+    }
+    
+    // Draw cargo ship image if loaded, otherwise fall back to drawn shape
+    if (cargoShipImageLoaded && cargoShipImage) {
+        // Draw cargo ship image, centered
+        ctx.drawImage(
+            cargoShipImage,
+            -cargoVessel.width / 2,  // X position (centered)
+            -cargoVessel.height / 2, // Y position (centered)
+            cargoVessel.width,       // Width
+            cargoVessel.height       // Height
+        );
+    } else {
+        // Fallback: Draw cargo vessel shape if image not loaded
     ctx.fillStyle = '#8b7355';
     ctx.fillRect(-cargoVessel.width / 2, -cargoVessel.height / 2, cargoVessel.width, cargoVessel.height);
     
@@ -2667,6 +3104,7 @@ function drawCargoVessel() {
     ctx.fillStyle = '#4a90e2';
     ctx.fillRect(-cargoVessel.width / 2 + 10, -5, 8, 8);
     ctx.fillRect(cargoVessel.width / 2 - 18, -5, 8, 8);
+    }
     
     ctx.restore();
 }
@@ -2674,11 +3112,23 @@ function drawCargoVessel() {
 function drawPlanets() {
     if (gameState.gameMode !== 'mission') return;
     
-    // Draw start planet
+    // Draw start planet (left side) - use planet1.png
     if (startPlanet) {
         ctx.save();
         ctx.translate(startPlanet.x, startPlanet.y);
         
+        if (planet1ImageLoaded && planet1Image) {
+            // Draw planet image, centered
+            const size = startPlanet.radius * 2;
+            ctx.drawImage(
+                planet1Image,
+                -startPlanet.radius,  // X position (centered)
+                -startPlanet.radius, // Y position (centered)
+                size,                // Width
+                size                 // Height
+            );
+        } else {
+            // Fallback: Draw circle if image not loaded
         const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, startPlanet.radius);
         gradient.addColorStop(0, startPlanet.color);
         gradient.addColorStop(0.7, hexToRgba(startPlanet.color, 0.7));
@@ -2692,15 +3142,28 @@ function drawPlanets() {
         ctx.strokeStyle = startPlanet.color;
         ctx.lineWidth = 2;
         ctx.stroke();
+        }
         
         ctx.restore();
     }
     
-    // Draw end planet
+    // Draw end planet (right side) - use planet2.png
     if (endPlanet) {
         ctx.save();
         ctx.translate(endPlanet.x, endPlanet.y);
         
+        if (planet2ImageLoaded && planet2Image) {
+            // Draw planet image, centered
+            const size = endPlanet.radius * 2;
+            ctx.drawImage(
+                planet2Image,
+                -endPlanet.radius,  // X position (centered)
+                -endPlanet.radius, // Y position (centered)
+                size,              // Width
+                size               // Height
+            );
+        } else {
+            // Fallback: Draw circle if image not loaded
         const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, endPlanet.radius);
         gradient.addColorStop(0, endPlanet.color);
         gradient.addColorStop(0.7, hexToRgba(endPlanet.color, 0.7));
@@ -2714,6 +3177,7 @@ function drawPlanets() {
         ctx.strokeStyle = endPlanet.color;
         ctx.lineWidth = 2;
         ctx.stroke();
+        }
         
         ctx.restore();
     }
@@ -3091,13 +3555,13 @@ function spawnCargoVessel() {
     // Fixed journey time in seconds (30 seconds base)
     const baseJourneyTimeSeconds = 30;
     const baseJourneyTimeFrames = baseJourneyTimeSeconds * 60; // 60 fps
-    const travelDistance = distance - 100; // Distance to travel (minus planet radii)
+    const travelDistance = distance - 160; // Distance to travel (minus planet radii, adjusted for larger planets)
     
     // Calculate base speed to complete journey in fixed time
     const baseSpeed = travelDistance / baseJourneyTimeFrames;
     
     cargoVessels.push({
-        x: startPlanet.x + 50,
+        x: startPlanet.x + 80,
         y: startPlanet.y,
         width: 60,
         height: 60,
@@ -3105,7 +3569,7 @@ function spawnCargoVessel() {
         maxHealth: 200,
         speed: baseSpeed,
         baseSpeed: baseSpeed,
-        targetX: endPlanet.x - 50,
+        targetX: endPlanet.x - 80,
         targetY: endPlanet.y,
         progress: 0,
         journeyTime: 0,
@@ -3616,21 +4080,29 @@ function gameLoop() {
             const now = Date.now();
             // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
             const creditDifficulty = cumulativeCredits / 100;
+            
+            // Maximum enemies on screen to prevent overwhelming swarms
+            const maxEnemiesOnScreen = Math.min(25, 4 + Math.floor(creditDifficulty * 0.8)); // Reduced from 8 to 4 at start, gradual increase to 25 max
+            
             // More gradual spawn rate decrease - uses a smoother curve to prevent sudden jumps
-            // Formula: baseRate - (creditDifficulty^1.5 * ratePerLevel) for smoother progression
-            const enemySpawnRate = Math.max(1000, 3500 - Math.pow(creditDifficulty, 1.3) * 50);
-            if (now - lastSpawn > enemySpawnRate) {
+            // Formula: baseRate - (creditDifficulty^1.2 * ratePerLevel) for even smoother progression
+            const enemySpawnRate = Math.max(1200, 8000 - Math.pow(creditDifficulty, 1.2) * 40); // Increased from 4000 to 8000ms at start (8 seconds)
+            
+            // Only spawn if we're under the enemy cap
+            if (enemies.length < maxEnemiesOnScreen && now - lastSpawn > enemySpawnRate) {
                 spawnEnemy();
                 lastSpawn = now;
             }
 
-            // Spawn multiple enemies only at very high credit levels, and very gradually
-            // Only spawn extra if we're well past the base spawn rate
-            if (creditDifficulty >= 15 && Math.random() < 0.1) {
+            // Very gradual chance for extra spawn at high difficulty (only if under cap)
+            // This replaces the sudden threshold-based spawns with a smooth probability curve
+            if (enemies.length < maxEnemiesOnScreen && creditDifficulty > 10) {
+                // Probability increases very gradually: 0% at difficulty 10, up to 5% at difficulty 50
+                const extraSpawnChance = Math.min(0.05, (creditDifficulty - 10) / 800);
+                if (Math.random() < extraSpawnChance && now - lastSpawn > enemySpawnRate * 0.5) {
                 spawnEnemy();
+                    lastSpawn = now;
             }
-            if (creditDifficulty >= 25 && Math.random() < 0.08) {
-                spawnEnemy();
             }
 
             // More gradual asteroid spawn rate - uses smoother curve
@@ -3730,10 +4202,17 @@ function restartGame() {
         commandModuleOpen: false,
         journeyCount: 0
     };
+    
+    // Ensure background music is playing when game starts
+    if (backgroundMusic && backgroundMusic.paused && audioContext && audioContext.state === 'running') {
+        backgroundMusic.play().catch(err => {
+            console.warn('Could not play background music:', err);
+        });
+    }
 
     // Reset player
-    player.x = canvas.width / 2;
-    player.y = canvas.height - 100;
+    player.x = getCanvasWidth() / 2;
+    player.y = getCanvasHeight() - 100;
     player.health = 100;
     player.maxHealth = 100;
     player.shields = 50;
@@ -3806,16 +4285,27 @@ document.addEventListener('DOMContentLoaded', () => {
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
     
-    // Set canvas size
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    // Set up canvas with proper device pixel ratio
+    setupCanvas();
     
-    // Initialize player position
-    player.x = canvas.width / 2;
-    player.y = canvas.height - 100;
+    // Initialize player position (use display size, not internal canvas size)
+    player.x = getCanvasWidth() / 2;
+    player.y = getCanvasHeight() - 100;
     
     // Initialize background
     initBackground();
+    
+    // Initialize player ship image
+    initPlayerShipImage();
+    
+    // Initialize planet images
+    initPlanetImages();
+    
+    // Initialize cargo ship image
+    initCargoShipImage();
+    
+    // Initialize enemy ship image
+    initEnemyShipImage();
     
     // Initialize audio
     initAudio();
@@ -3846,32 +4336,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const missionRestartBtn = document.getElementById('missionRestartBtn');
     if (missionRestartBtn) {
         missionRestartBtn.addEventListener('click', () => {
-            document.getElementById('missionComplete').classList.add('hidden');
-            showModeSelect();
-        });
+        document.getElementById('missionComplete').classList.add('hidden');
+        showModeSelect();
+    });
     }
     
     const closeUpgradeBtn = document.getElementById('closeUpgrade');
     if (closeUpgradeBtn) {
         closeUpgradeBtn.addEventListener('click', () => {
-            document.getElementById('upgradeMenu').classList.add('hidden');
-            gameState.paused = false;
-        });
+        document.getElementById('upgradeMenu').classList.add('hidden');
+        gameState.paused = false;
+    });
     }
     
     // Command module buttons
     const recruitCrewBtn = document.getElementById('recruitCrewBtn');
     if (recruitCrewBtn) {
         recruitCrewBtn.addEventListener('click', () => {
-            recruitCrew();
-        });
+        recruitCrew();
+    });
     }
     
     const buyClusterBtn = document.getElementById('buyClusterBtn');
     if (buyClusterBtn) {
         buyClusterBtn.addEventListener('click', () => {
-            buyClusterAmmo();
-        });
+        buyClusterAmmo();
+    });
     }
     
     const closeCommandModuleBtn = document.getElementById('closeCommandModule');
