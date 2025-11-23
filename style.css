@@ -59,6 +59,30 @@ body {
     flex: 1;
 }
 
+.audio-controls {
+    display: flex;
+    gap: 5px;
+    margin: 0 10px;
+}
+
+.audio-toggle {
+    background: rgba(0, 150, 255, 0.3);
+    border: 1px solid rgba(0, 150, 255, 0.5);
+    color: #66aaff;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.3s;
+    line-height: 1;
+    min-width: 32px;
+}
+
+.audio-toggle:hover {
+    background: rgba(0, 150, 255, 0.5);
+    border-color: rgba(0, 150, 255, 0.8);
+}
+
 .hud-toggle {
     background: rgba(0, 150, 255, 0.3);
     border: 1px solid rgba(0, 150, 255, 0.5);

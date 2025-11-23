@@ -204,7 +204,10 @@ let mouseButtonDown = false;
 // Sound System
 let audioContext;
 let soundEnabled = true;
-let backgroundMusic = null;
+let musicEnabled = true;
+let soundEffectsEnabled = true;
+let backgroundMusic = [];
+let currentMusicIndex = 0;
 
 function initAudio() {
     try {
@@ -214,20 +217,33 @@ function initAudio() {
         soundEnabled = false;
     }
     
-    // Initialize background music
-    backgroundMusic = new Audio('runorhide.mp3');
-    backgroundMusic.loop = true;
-    backgroundMusic.volume = 0.5; // Set volume to 50% so it doesn't overpower sound effects
+    // Initialize background music playlist
+    const playlist = ['runorhide.mp3', 'nevermind.mp3'];
     
-    // Handle audio loading errors
-    backgroundMusic.onerror = () => {
-        console.warn('Failed to load background music: runorhide.mp3');
-    };
-    
-    // Try to play music when user interacts (required for autoplay policies)
-    backgroundMusic.oncanplaythrough = () => {
-        // Music is ready, but we'll start it on first user interaction
-    };
+    playlist.forEach((song, index) => {
+        const audio = new Audio(song);
+        audio.volume = 0.5; // Set volume to 50% so it doesn't overpower sound effects
+        
+        // Handle audio loading errors
+        audio.onerror = () => {
+            console.warn(`Failed to load background music: ${song}`);
+        };
+        
+        // When a song ends, play the next one in the playlist
+        audio.addEventListener('ended', () => {
+            if (musicEnabled) {
+                currentMusicIndex = (currentMusicIndex + 1) % playlist.length;
+                const nextSong = backgroundMusic[currentMusicIndex];
+                if (nextSong) {
+                    nextSong.play().catch(err => {
+                        console.warn(`Could not play next song: ${err}`);
+                    });
+                }
+            }
+        });
+        
+        backgroundMusic.push(audio);
+    });
 }
 
 function resumeAudioContext() {
@@ -236,15 +252,18 @@ function resumeAudioContext() {
     }
     
     // Start background music on first user interaction (required for autoplay policies)
-    if (backgroundMusic && backgroundMusic.paused) {
-        backgroundMusic.play().catch(err => {
-            console.warn('Could not play background music:', err);
-        });
+    if (backgroundMusic.length > 0 && musicEnabled) {
+        const currentSong = backgroundMusic[currentMusicIndex];
+        if (currentSong && currentSong.paused) {
+            currentSong.play().catch(err => {
+                console.warn('Could not play background music:', err);
+            });
+        }
     }
 }
 
 function playSound(frequency, duration, type = 'sine', volume = 0.3, startFreq = null) {
-    if (!soundEnabled || !audioContext) return;
+    if (!soundEnabled || !soundEffectsEnabled || !audioContext) return;
     
     // Resume audio context if suspended (browsers require user interaction)
     resumeAudioContext();
@@ -2198,6 +2217,33 @@ function createExplosion(x, y, size) {
             life: 20 + Math.random() * 15,
             maxLife: 20 + Math.random() * 15,
             size: Math.min(size * 0.15 + Math.random() * size * 0.2, 8),
+            color: `hsl(${Math.random() * 60}, 100%, ${50 + Math.random() * 50}%)`,
+            glow: true
+        });
+    }
+}
+
+function createBigExplosion(x, y, size) {
+    // Special function for big explosions that bypasses normal particle limits
+    // Temporarily increase particle limit for dramatic effect
+    const particleCount = Math.min(50 + Math.floor(size / 2), 100);
+    
+    // Clear some space if needed, but allow more particles for big explosions
+    const tempMaxParticles = MAX_PARTICLES * 2;
+    const availableSlots = tempMaxParticles - particles.length;
+    const actualCount = Math.min(particleCount, availableSlots);
+    
+    for (let i = 0; i < actualCount; i++) {
+        const angle = (i / actualCount) * Math.PI * 2;
+        const speed = 3 + Math.random() * 10; // Faster particles for big explosion
+        particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 30 + Math.random() * 20, // Longer life for visibility
+            maxLife: 30 + Math.random() * 20,
+            size: Math.min(size * 0.2 + Math.random() * size * 0.3, 12), // Larger particles
             color: `hsl(${Math.random() * 60}, 100%, ${50 + Math.random() * 50}%)`,
             glow: true
         });
@@ -4159,6 +4205,31 @@ function gameLoop() {
 
 function gameOver() {
     gameState.running = false;
+    
+    // Create a big explosion at the player's position
+    if (player && !isNaN(player.x) && !isNaN(player.y)) {
+        // Create a massive central explosion
+        const explosionSize = 200; // Very large explosion
+        createBigExplosion(player.x, player.y, explosionSize);
+        
+        // Create additional smaller explosions around the player for more impact
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const distance = 40 + Math.random() * 60;
+            const offsetX = Math.cos(angle) * distance;
+            const offsetY = Math.sin(angle) * distance;
+            setTimeout(() => {
+                createBigExplosion(player.x + offsetX, player.y + offsetY, 100 + Math.random() * 60);
+            }, i * 80); // Stagger the explosions for dramatic effect
+        }
+        
+        // Play multiple big explosion sounds for impact
+        sounds.enemyExplosion();
+        setTimeout(() => sounds.enemyExplosion(), 100);
+        setTimeout(() => sounds.enemyExplosion(), 200);
+        setTimeout(() => sounds.enemyExplosion(), 300);
+    }
+    
     document.getElementById('finalScore').textContent = gameState.score;
     document.getElementById('gameOver').classList.remove('hidden');
 }
@@ -4204,10 +4275,13 @@ function restartGame() {
     };
     
     // Ensure background music is playing when game starts
-    if (backgroundMusic && backgroundMusic.paused && audioContext && audioContext.state === 'running') {
-        backgroundMusic.play().catch(err => {
-            console.warn('Could not play background music:', err);
-        });
+    if (backgroundMusic.length > 0 && musicEnabled && audioContext && audioContext.state === 'running') {
+        const currentSong = backgroundMusic[currentMusicIndex];
+        if (currentSong && currentSong.paused) {
+            currentSong.play().catch(err => {
+                console.warn('Could not play background music:', err);
+            });
+        }
     }
 
     // Reset player
@@ -4325,6 +4399,59 @@ document.addEventListener('DOMContentLoaded', () => {
             hudContent.classList.toggle('collapsed');
             hudToggle.textContent = hudContent.classList.contains('collapsed') ? '▲' : '▼';
         });
+    }
+    
+    // Set up audio controls
+    const musicToggle = document.getElementById('musicToggle');
+    if (musicToggle) {
+        musicToggle.addEventListener('click', () => {
+            musicEnabled = !musicEnabled;
+            if (backgroundMusic.length > 0) {
+                if (musicEnabled) {
+                    const currentSong = backgroundMusic[currentMusicIndex];
+                    if (currentSong) {
+                        currentSong.play().catch(err => {
+                            console.warn('Could not play background music:', err);
+                        });
+                    }
+                    musicToggle.textContent = '🎵';
+                    musicToggle.title = 'Toggle Music (On)';
+                } else {
+                    // Pause all songs in the playlist
+                    backgroundMusic.forEach(song => {
+                        if (song && !song.paused) {
+                            song.pause();
+                        }
+                    });
+                    musicToggle.textContent = '🔇';
+                    musicToggle.title = 'Toggle Music (Off)';
+                }
+            }
+        });
+    }
+    
+    const soundToggle = document.getElementById('soundToggle');
+    if (soundToggle) {
+        // Initialize button state
+        soundToggle.textContent = soundEffectsEnabled ? '🔊' : '🔇';
+        soundToggle.title = soundEffectsEnabled ? 'Toggle Sound Effects (On)' : 'Toggle Sound Effects (Off)';
+        
+        soundToggle.addEventListener('click', () => {
+            soundEffectsEnabled = !soundEffectsEnabled;
+            if (soundEffectsEnabled) {
+                soundToggle.textContent = '🔊';
+                soundToggle.title = 'Toggle Sound Effects (On)';
+            } else {
+                soundToggle.textContent = '🔇';
+                soundToggle.title = 'Toggle Sound Effects (Off)';
+            }
+        });
+    }
+    
+    // Initialize music toggle button state
+    if (musicToggle) {
+        musicToggle.textContent = musicEnabled ? '🎵' : '🔇';
+        musicToggle.title = musicEnabled ? 'Toggle Music (On)' : 'Toggle Music (Off)';
     }
     
     // Set up button event listeners
