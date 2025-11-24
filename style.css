@@ -211,6 +211,21 @@ body {
     margin-bottom: 10px;
 }
 
+#gameOver p.new-high-score {
+    color: #ffd700;
+    text-shadow: 0 0 20px rgba(255, 215, 0, 0.8);
+    animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+}
+
 #gameOver button {
     margin-top: 20px;
     padding: 12px 24px;
@@ -770,6 +785,79 @@ body {
 .mobile-command-btn:active {
     transform: scale(0.95);
     box-shadow: 0 2px 8px rgba(0, 255, 0, 0.3);
+}
+
+/* Mobile Rotation Controls */
+.mobile-rotation-controls {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    display: flex;
+    gap: 15px;
+    z-index: 50;
+}
+
+.mobile-rotate-btn {
+    width: 60px;
+    height: 60px;
+    background: rgba(0, 150, 255, 0.3);
+    border: 2px solid rgba(0, 150, 255, 0.5);
+    border-radius: 50%;
+    color: #66aaff;
+    font-size: 32px;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    box-shadow: 0 4px 15px rgba(0, 150, 255, 0.3);
+}
+
+.mobile-rotate-btn:active {
+    background: rgba(0, 150, 255, 0.6);
+    border-color: rgba(0, 150, 255, 0.9);
+    transform: scale(0.95);
+    box-shadow: 0 2px 8px rgba(0, 150, 255, 0.5);
+}
+
+/* Mobile Tractor Beam Button */
+.mobile-tractor-btn {
+    position: fixed;
+    bottom: 100px;
+    right: 20px;
+    padding: 12px 20px;
+    margin: 0;
+    background: rgba(150, 0, 255, 0.3);
+    border: 2px solid rgba(150, 0, 255, 0.5);
+    border-radius: 10px;
+    color: #aa66ff;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s;
+    user-select: none;
+    -webkit-user-select: none;
+    z-index: 50;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    box-shadow: 0 4px 15px rgba(150, 0, 255, 0.3);
+}
+
+.mobile-tractor-btn:active {
+    background: rgba(150, 0, 255, 0.6);
+    border-color: rgba(150, 0, 255, 0.9);
+    transform: scale(0.98);
+    box-shadow: 0 2px 8px rgba(150, 0, 255, 0.5);
+}
+
+.mobile-tractor-btn.active {
+    background: rgba(150, 0, 255, 0.6);
+    border-color: rgba(150, 0, 255, 0.9);
+    box-shadow: 0 0 20px rgba(150, 0, 255, 0.7);
 }
 
 /* Mobile Responsive Styles */

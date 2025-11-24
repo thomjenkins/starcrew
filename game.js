@@ -186,6 +186,33 @@ let powerups = [];
 let allies = [];
 let particles = [];
 let explosions = [];
+let fireworks = [];
+
+// High Score
+let highScore = 0;
+let newHighScore = false;
+
+// Load high score from localStorage
+function loadHighScore() {
+    try {
+        const saved = localStorage.getItem('asteroidDroidHighScore');
+        if (saved) {
+            highScore = parseInt(saved, 10) || 0;
+        }
+    } catch (e) {
+        console.warn('Could not load high score:', e);
+    }
+}
+
+// Save high score to localStorage
+function saveHighScore(score) {
+    try {
+        localStorage.setItem('asteroidDroidHighScore', score.toString());
+        highScore = score;
+    } catch (e) {
+        console.warn('Could not save high score:', e);
+    }
+}
 
 // Mission mode objects
 let cargoVessels = []; // Changed to array to support multiple cargo ships
@@ -200,6 +227,11 @@ let mouseX = 0;
 let mouseY = 0;
 let mouseActive = false;
 let mouseButtonDown = false;
+
+// Mobile control state
+let mobileTractorBeamActive = false;
+let mobileRotateLeft = false;
+let mobileRotateRight = false;
 
 // Sound System
 let audioContext;
@@ -693,7 +725,7 @@ function drawGameTitle() {
     
     ctx.save();
     
-    const title = "Star Crew";
+    const title = "Asteroid Droid";
     const fontSize = Math.max(60, getCanvasWidth() / 15);
     
     // Set font
@@ -774,10 +806,11 @@ function updatePlayer() {
     } else {
         // Normal rotation controls when tractor beam is not active
         // A/D rotation controls work regardless of movement method
-        if (keys['a']) {
+        // Also support mobile rotation buttons
+        if (keys['a'] || mobileRotateLeft) {
             player.rotation -= player.rotationSpeed;
         }
-        if (keys['d']) {
+        if (keys['d'] || mobileRotateRight) {
             player.rotation += player.rotationSpeed;
         }
     }
@@ -2020,6 +2053,11 @@ function deactivateTractorBeam() {
     tractorBeam.target = null;
     tractorBeam.targetType = null;
     tractorBeam.currentDuration = 0;
+    mobileTractorBeamActive = false;
+    const mobileTractorBeamBtn = document.getElementById('mobileTractorBeamBtn');
+    if (mobileTractorBeamBtn) {
+        mobileTractorBeamBtn.classList.remove('active');
+    }
 }
 
 function updateTractorBeam() {
@@ -2058,6 +2096,7 @@ function updateTractorBeam() {
     // Deactivate if target is out of range
     if (dist > tractorBeam.range) {
         deactivateTractorBeam();
+        mobileTractorBeamActive = false;
         return;
     }
     
@@ -2265,6 +2304,136 @@ function updateParticles() {
             particles.splice(i, 1);
         }
     }
+}
+
+// Fireworks System
+function createFireworks() {
+    // Create multiple fireworks bursts across the screen
+    const fireworkCount = 5 + Math.floor(Math.random() * 5); // 5-9 fireworks
+    
+    for (let i = 0; i < fireworkCount; i++) {
+        setTimeout(() => {
+            const x = Math.random() * getCanvasWidth();
+            const y = Math.random() * (getCanvasHeight() * 0.6); // Upper 60% of screen
+            launchFirework(x, y);
+        }, i * 200); // Stagger fireworks
+    }
+}
+
+function launchFirework(x, y) {
+    // Create a rocket that travels upward
+    const rocket = {
+        x: x,
+        y: getCanvasHeight(),
+        targetY: y,
+        speed: 3 + Math.random() * 2,
+        color: `hsl(${Math.random() * 360}, 100%, 50%)`,
+        life: 60
+    };
+    
+    // Animate rocket
+    const rocketInterval = setInterval(() => {
+        rocket.y -= rocket.speed;
+        
+        // Create trail
+        particles.push({
+            x: rocket.x,
+            y: rocket.y,
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: 1 + Math.random() * 0.5,
+            life: 10,
+            maxLife: 10,
+            size: 2,
+            color: rocket.color,
+            glow: true
+        });
+        
+        if (rocket.y <= rocket.targetY || rocket.life-- <= 0) {
+            clearInterval(rocketInterval);
+            explodeFirework(rocket.x, rocket.y, rocket.color);
+        }
+    }, 16); // ~60fps
+}
+
+function explodeFirework(x, y, baseColor) {
+    // Extract hue from color
+    const hueMatch = baseColor.match(/hsl\((\d+)/);
+    const baseHue = hueMatch ? parseInt(hueMatch[1]) : Math.random() * 360;
+    
+    // Create burst of particles
+    const particleCount = 30 + Math.floor(Math.random() * 20); // 30-50 particles
+    
+    for (let i = 0; i < particleCount; i++) {
+        const angle = (i / particleCount) * Math.PI * 2;
+        const speed = 2 + Math.random() * 4;
+        const hue = (baseHue + (Math.random() - 0.5) * 60) % 360;
+        
+        fireworks.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 40 + Math.random() * 20,
+            maxLife: 40 + Math.random() * 20,
+            size: 3 + Math.random() * 3,
+            color: `hsl(${hue}, 100%, ${50 + Math.random() * 50}%)`,
+            glow: true
+        });
+    }
+}
+
+function updateFireworks() {
+    for (let i = fireworks.length - 1; i >= 0; i--) {
+        const firework = fireworks[i];
+        firework.x += firework.vx;
+        firework.y += firework.vy;
+        firework.vy += 0.15; // Gravity
+        firework.vx *= 0.98; // Air resistance
+        firework.vy *= 0.98;
+        firework.life--;
+        
+        if (firework.life <= 0) {
+            fireworks.splice(i, 1);
+        }
+    }
+}
+
+function drawFireworks() {
+    if (fireworks.length === 0) return;
+    
+    ctx.save();
+    
+    for (let i = 0; i < fireworks.length; i++) {
+        const firework = fireworks[i];
+        const alpha = firework.life / firework.maxLife;
+        
+        if (alpha < 0.1) continue;
+        
+        // Glow effect
+        if (firework.glow && alpha > 0.3) {
+            ctx.shadowBlur = firework.size * 3 * alpha;
+            ctx.shadowColor = firework.color;
+        } else {
+            ctx.shadowBlur = 0;
+        }
+        
+        // Convert HSL to RGBA
+        const hslMatch = firework.color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+        if (hslMatch) {
+            const h = hslMatch[1];
+            const s = hslMatch[2];
+            const l = hslMatch[3];
+            ctx.fillStyle = `hsla(${h}, ${s}%, ${l}%, ${alpha})`;
+        } else {
+            ctx.fillStyle = firework.color;
+        }
+        
+        ctx.beginPath();
+        ctx.arc(firework.x, firework.y, firework.size * alpha, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    ctx.restore();
 }
 
 // Upgrade system
@@ -3964,6 +4133,30 @@ function updateUI() {
     document.getElementById('level').textContent = gameState.level;
     document.getElementById('allies').textContent = allies.length;
     
+    // Check for new high score
+    if (gameState.score > highScore) {
+        const wasNewHighScore = newHighScore;
+        newHighScore = true;
+        saveHighScore(gameState.score);
+        
+        // Show fireworks if this is the first time reaching this high score
+        if (!wasNewHighScore) {
+            createFireworks();
+        }
+    }
+    
+    // Update high score display
+    const highScoreEl = document.getElementById('highScore');
+    if (highScoreEl) {
+        highScoreEl.textContent = highScore;
+    }
+    
+    // Update final high score in game over screen
+    const finalHighScoreEl = document.getElementById('finalHighScore');
+    if (finalHighScoreEl) {
+        finalHighScoreEl.textContent = highScore;
+    }
+    
     // Show cargo vessel health in mission mode
     const cargoStat = document.getElementById('cargoHealthStat');
     if (gameState.gameMode === 'mission' && cargoVessel) {
@@ -4088,6 +4281,97 @@ function setupMobileControls() {
             }
         });
     }
+    
+    // Mobile Tractor Beam Toggle
+    const mobileTractorBeamBtn = document.getElementById('mobileTractorBeamBtn');
+    if (mobileTractorBeamBtn) {
+        mobileTractorBeamBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!gameState.paused && gameState.running) {
+                if (mobileTractorBeamActive) {
+                    // Deactivate
+                    deactivateTractorBeam();
+                    mobileTractorBeamActive = false;
+                } else {
+                    // Activate
+                    if (tractorBeam.charge > 0 && !tractorBeam.active) {
+                        activateTractorBeam();
+                        if (tractorBeam.active) {
+                            mobileTractorBeamActive = true;
+                            mobileTractorBeamBtn.classList.add('active');
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Mobile Rotation Controls
+    const mobileRotateLeftBtn = document.getElementById('mobileRotateLeftBtn');
+    const mobileRotateRightBtn = document.getElementById('mobileRotateRightBtn');
+    
+    if (mobileRotateLeftBtn) {
+        mobileRotateLeftBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mobileRotateLeft = true;
+        });
+        mobileRotateLeftBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mobileRotateLeft = false;
+        });
+        mobileRotateLeftBtn.addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mobileRotateLeft = false;
+        });
+        mobileRotateLeftBtn.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mobileRotateLeft = true;
+        });
+        mobileRotateLeftBtn.addEventListener('mouseup', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mobileRotateLeft = false;
+        });
+        mobileRotateLeftBtn.addEventListener('mouseleave', () => {
+            mobileRotateLeft = false;
+        });
+    }
+    
+    if (mobileRotateRightBtn) {
+        mobileRotateRightBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mobileRotateRight = true;
+        });
+        mobileRotateRightBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mobileRotateRight = false;
+        });
+        mobileRotateRightBtn.addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mobileRotateRight = false;
+        });
+        mobileRotateRightBtn.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mobileRotateRight = true;
+        });
+        mobileRotateRightBtn.addEventListener('mouseup', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mobileRotateRight = false;
+        });
+        mobileRotateRightBtn.addEventListener('mouseleave', () => {
+            mobileRotateRight = false;
+        });
+    }
 }
 
 // Game loop
@@ -4115,6 +4399,7 @@ function gameLoop() {
             updateAllies();
             updateParticles();
             updateEnemyBullets();
+            updateFireworks();
             
             // Mission mode updates
             if (gameState.gameMode === 'mission') {
@@ -4186,6 +4471,7 @@ function gameLoop() {
         drawPlanets();
         drawNebulas(); // Draw nebulas behind other objects
         drawParticles();
+        drawFireworks(); // Draw fireworks (for high score celebration)
         drawAsteroids();
         drawEnemies();
         drawTractorBeam(); // Draw tractor beam
@@ -4206,6 +4492,12 @@ function gameLoop() {
 
 function gameOver() {
     gameState.running = false;
+    
+    // Check for new high score
+    if (gameState.score > highScore) {
+        newHighScore = true;
+        saveHighScore(gameState.score);
+    }
     
     // Create a big explosion at the player's position
     if (player && !isNaN(player.x) && !isNaN(player.y)) {
@@ -4232,6 +4524,15 @@ function gameOver() {
     }
     
     document.getElementById('finalScore').textContent = gameState.score;
+    const highScoreDisplay = document.getElementById('finalHighScore');
+    if (highScoreDisplay) {
+        highScoreDisplay.textContent = highScore;
+        if (newHighScore) {
+            highScoreDisplay.parentElement.classList.add('new-high-score');
+        } else {
+            highScoreDisplay.parentElement.classList.remove('new-high-score');
+        }
+    }
     document.getElementById('gameOver').classList.remove('hidden');
 }
 
@@ -4274,6 +4575,10 @@ function restartGame() {
         commandModuleOpen: false,
         journeyCount: 0
     };
+    
+    // Reset high score flag and clear fireworks
+    newHighScore = false;
+    fireworks = [];
     
     // Ensure background music is playing when game starts
     if (backgroundMusic.length > 0 && musicEnabled && audioContext && audioContext.state === 'running') {
@@ -4381,6 +4686,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize enemy ship image
     initEnemyShipImage();
+    
+    // Load high score
+    loadHighScore();
     
     // Initialize audio
     initAudio();
@@ -4548,6 +4856,17 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Mobile control buttons
     setupMobileControls();
+    
+    // Load high score
+    loadHighScore();
+    const highScoreEl = document.getElementById('highScore');
+    if (highScoreEl) {
+        highScoreEl.textContent = highScore;
+    }
+    const finalHighScoreEl = document.getElementById('finalHighScore');
+    if (finalHighScoreEl) {
+        finalHighScoreEl.textContent = highScore;
+    }
     
     // Show mode selection on start
     showModeSelect();

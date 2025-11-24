@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Star Crew</title>
+    <title>Asteroid Droid</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,6 +14,7 @@
                 <div class="hud-header">
                     <div class="stat score-stat">
                         <span>Score: <span id="score">0</span></span>
+                        <span style="margin-left: 15px; color: #66aaff;">High: <span id="highScore">0</span></span>
                     </div>
                     <div class="audio-controls">
                         <button id="musicToggle" class="audio-toggle" title="Toggle Music">🎵</button>
@@ -94,11 +95,17 @@
                     <span class="weapon-ammo" id="mobileClusterAmmo">0</span>
                 </button>
             </div>
+            <div id="mobileRotation" class="mobile-rotation-controls">
+                <button id="mobileRotateLeftBtn" class="mobile-rotate-btn">↶</button>
+                <button id="mobileRotateRightBtn" class="mobile-rotate-btn">↷</button>
+            </div>
+            <button id="mobileTractorBeamBtn" class="mobile-tractor-btn">Tractor</button>
             <button id="mobileCommandBtn" class="mobile-command-btn">Command</button>
         </div>
         <div id="gameOver" class="hidden">
             <h2>Game Over</h2>
             <p>Final Score: <span id="finalScore">0</span></p>
+            <p>High Score: <span id="finalHighScore">0</span></p>
             <button id="restartBtn">Restart</button>
         </div>
         <div id="upgradeMenu" class="hidden">
@@ -107,7 +114,7 @@
             <button id="closeUpgrade">Close</button>
         </div>
         <div id="modeSelect" class="hidden">
-            <h2>Star Crew</h2>
+            <h2>Asteroid Droid</h2>
             <div id="instructions" class="instructions">
                 <h3>Controls</h3>
                 <div class="instructions-content">
@@ -115,6 +122,7 @@
                         <p><strong>Movement:</strong> WASD or Arrow Keys</p>
                         <p><strong>Move & Shoot:</strong> Mouse/Trackpad (click to shoot)</p>
                         <p><strong>Weapons:</strong> Space (Primary) | 1 (Missile) | 2 (Laser) | 3 (Cluster)</p>
+                        <p><strong>Tractor Beam:</strong> T key</p>
                         <p><strong>Command Module:</strong> P key</p>
                     </div>
                     <div class="mobile-instructions">
