@@ -4210,25 +4210,19 @@ function updateMobileWeaponUI() {
     // Update mobile weapon ammo displays
     const mobileMissileAmmo = document.getElementById('mobileMissileAmmo');
     const mobileLaserAmmo = document.getElementById('mobileLaserAmmo');
-    const mobileClusterAmmo = document.getElementById('mobileClusterAmmo');
     
     if (mobileMissileAmmo) mobileMissileAmmo.textContent = weapons.missile.ammo;
     if (mobileLaserAmmo) mobileLaserAmmo.textContent = weapons.laser.ammo;
-    if (mobileClusterAmmo) mobileClusterAmmo.textContent = weapons.cluster.ammo;
     
     // Update mobile weapon button states (disabled/enabled)
     const mobileMissileBtn = document.getElementById('mobileMissileBtn');
     const mobileLaserBtn = document.getElementById('mobileLaserBtn');
-    const mobileClusterBtn = document.getElementById('mobileClusterBtn');
     
     if (mobileMissileBtn) {
         mobileMissileBtn.disabled = weapons.missile.cooldown > 0 || weapons.missile.ammo <= 0;
     }
     if (mobileLaserBtn) {
         mobileLaserBtn.disabled = weapons.laser.cooldown > 0 || weapons.laser.ammo <= 0;
-    }
-    if (mobileClusterBtn) {
-        mobileClusterBtn.disabled = weapons.cluster.cooldown > 0 || weapons.cluster.ammo <= 0;
     }
 }
 
@@ -4237,7 +4231,6 @@ function setupMobileControls() {
     // Mobile weapon buttons
     const mobileMissileBtn = document.getElementById('mobileMissileBtn');
     const mobileLaserBtn = document.getElementById('mobileLaserBtn');
-    const mobileClusterBtn = document.getElementById('mobileClusterBtn');
     const mobileCommandBtn = document.getElementById('mobileCommandBtn');
     
     if (mobileMissileBtn) {
@@ -4256,16 +4249,6 @@ function setupMobileControls() {
             e.stopPropagation();
             if (weapons.laser.cooldown === 0 && weapons.laser.ammo > 0) {
                 shoot('laser');
-            }
-        });
-    }
-    
-    if (mobileClusterBtn) {
-        mobileClusterBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
-                shoot('cluster');
             }
         });
     }
