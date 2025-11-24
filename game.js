@@ -306,7 +306,7 @@ function playSweep(startFreq, endFreq, duration, volume = 0.2) {
 
 // Dubstep-style sound functions
 function playWobble(baseFreq, duration, wobbleRate = 8, wobbleDepth = 0.3, volume = 0.3) {
-    if (!soundEnabled || !audioContext) return;
+    if (!soundEnabled || !soundEffectsEnabled || !audioContext) return;
     resumeAudioContext();
     
     try {
@@ -356,7 +356,7 @@ function playWobble(baseFreq, duration, wobbleRate = 8, wobbleDepth = 0.3, volum
 }
 
 function playBassDrop(freq, duration, volume = 0.4) {
-    if (!soundEnabled || !audioContext) return;
+    if (!soundEnabled || !soundEffectsEnabled || !audioContext) return;
     resumeAudioContext();
     
     try {
@@ -393,7 +393,7 @@ function playBassDrop(freq, duration, volume = 0.4) {
 }
 
 function playDubstepBeep(frequency, duration, volume = 0.2) {
-    if (!soundEnabled || !audioContext) return;
+    if (!soundEnabled || !soundEffectsEnabled || !audioContext) return;
     resumeAudioContext();
     
     try {
@@ -672,6 +672,9 @@ function setupMouseControls() {
 // Draw starfield
 function drawStarfield() {
     if (!ctx || !canvas) return;
+    
+    // Clear canvas first for better performance
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     // Draw background image if loaded, otherwise black background
     if (backgroundImageLoaded && backgroundImage) {
@@ -1279,7 +1282,7 @@ function spawnNebula() {
     
     // Generate cloud blobs for morphing cloud shape
     const cloudBlobs = [];
-    const blobCount = 8 + Math.floor(Math.random() * 8); // 8-15 blobs
+    const blobCount = 4 + Math.floor(Math.random() * 4); // 4-7 blobs (reduced for performance)
     for (let i = 0; i < blobCount; i++) {
         const angle = Math.random() * Math.PI * 2;
         const dist = (Math.random() * 0.6 + 0.2) * size / 2; // Random distance from center
@@ -1455,7 +1458,8 @@ function updateNebulas() {
     
     // Remove nebulas that are too old (optional - or keep them forever)
     // For now, keep them but limit count
-    if (nebulas.length > 5) {
+    // Limit nebulas on screen for performance (reduced from 5 to 3)
+    if (nebulas.length > 3) {
         nebulas.shift(); // Remove oldest
     }
 }
@@ -1509,14 +1513,13 @@ function drawNebulas() {
                 const normalizedDist = distFromCenter / (nebula.width / 2);
                 const opacity = (1 - normalizedDist * 0.5) * 0.8; // Fade out at edges
                 
-                // Inner glow (brighter)
+                // Inner glow (brighter) - reduced color stops for performance
                 blobGradient.addColorStop(0, hslToRgba(nebula.glowColor, opacity * 0.9));
-                blobGradient.addColorStop(0.3, hslToRgba(nebula.color, opacity * 0.7));
-                blobGradient.addColorStop(0.6, hslToRgba(nebula.color, opacity * 0.4));
+                blobGradient.addColorStop(0.5, hslToRgba(nebula.color, opacity * 0.5)); // Combined middle stops
                 blobGradient.addColorStop(1, hslToRgba(nebula.color, 0));
                 
                 ctx.fillStyle = blobGradient;
-                ctx.shadowBlur = 20;
+                ctx.shadowBlur = 10; // Reduced from 20 for performance
         ctx.shadowColor = nebula.glowColor;
                 
                 // Draw blob as soft circle
@@ -1525,35 +1528,33 @@ function drawNebulas() {
         ctx.fill();
             });
             
-            // Draw additional smaller wisps for more detail
-            ctx.globalAlpha = 0.4;
+            // Draw additional smaller wisps for more detail (reduced for performance)
+            ctx.globalAlpha = 0.3;
             nebula.cloudBlobs.forEach(blob => {
-                // Add smaller wisps around each main blob
-                for (let i = 0; i < 2; i++) {
-                    const wispAngle = nebula.morphTime * 0.3 + blob.phase + i * Math.PI;
-                    const wispDist = blob.radius * 0.6;
-                    const wispX = blob.x + Math.cos(wispAngle) * wispDist;
-                    const wispY = blob.y + Math.sin(wispAngle) * wispDist;
-                    const wispRadius = blob.radius * 0.4;
-                    
-                    const wispGradient = ctx.createRadialGradient(
-                        wispX, wispY, 0,
-                        wispX, wispY, wispRadius
-                    );
-                    wispGradient.addColorStop(0, hslToRgba(nebula.color, 0.5));
-                    wispGradient.addColorStop(1, hslToRgba(nebula.color, 0));
-                    
-                    ctx.fillStyle = wispGradient;
-                    ctx.beginPath();
-                    ctx.arc(wispX, wispY, wispRadius, 0, Math.PI * 2);
-                    ctx.fill();
-                }
+                // Add smaller wisps around each main blob (reduced from 2 to 1 per blob)
+                const wispAngle = nebula.morphTime * 0.3 + blob.phase;
+                const wispDist = blob.radius * 0.6;
+                const wispX = blob.x + Math.cos(wispAngle) * wispDist;
+                const wispY = blob.y + Math.sin(wispAngle) * wispDist;
+                const wispRadius = blob.radius * 0.4;
+                
+                const wispGradient = ctx.createRadialGradient(
+                    wispX, wispY, 0,
+                    wispX, wispY, wispRadius
+                );
+                wispGradient.addColorStop(0, hslToRgba(nebula.color, 0.4));
+                wispGradient.addColorStop(1, hslToRgba(nebula.color, 0));
+                
+                ctx.fillStyle = wispGradient;
+                ctx.beginPath();
+                ctx.arc(wispX, wispY, wispRadius, 0, Math.PI * 2);
+                ctx.fill();
             });
             
             // Draw bright core in center
             ctx.globalAlpha = 1;
             ctx.globalCompositeOperation = 'source-over';
-            ctx.shadowBlur = 30;
+            ctx.shadowBlur = 15; // Reduced from 30 for performance
             ctx.shadowColor = nebula.glowColor;
             const coreGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, nebula.width / 6);
         coreGradient.addColorStop(0, '#ffffff');
@@ -1571,7 +1572,7 @@ function drawNebulas() {
             gradient.addColorStop(0.7, hexToRgba(nebula.color, 0.5));
             gradient.addColorStop(1, hexToRgba(nebula.color, 0));
             
-            ctx.shadowBlur = 30;
+            ctx.shadowBlur = 15; // Reduced from 30 for performance
             ctx.shadowColor = nebula.glowColor;
             ctx.fillStyle = gradient;
             ctx.beginPath();
@@ -2225,11 +2226,11 @@ function createExplosion(x, y, size) {
 
 function createBigExplosion(x, y, size) {
     // Special function for big explosions that bypasses normal particle limits
-    // Temporarily increase particle limit for dramatic effect
-    const particleCount = Math.min(50 + Math.floor(size / 2), 100);
+    // Temporarily increase particle limit for dramatic effect (reduced for performance)
+    const particleCount = Math.min(40 + Math.floor(size / 3), 75); // Reduced from 50-100 to 40-75
     
     // Clear some space if needed, but allow more particles for big explosions
-    const tempMaxParticles = MAX_PARTICLES * 2;
+    const tempMaxParticles = Math.floor(MAX_PARTICLES * 1.5); // Reduced from 2x to 1.5x (300 instead of 400)
     const availableSlots = tempMaxParticles - particles.length;
     const actualCount = Math.min(particleCount, availableSlots);
     
@@ -2950,9 +2951,9 @@ function drawParticles() {
         // Skip very transparent particles
         if (alpha < 0.1) continue;
         
-        // Only set shadow if needed (expensive operation)
-        if (particle.glow && alpha > 0.3) {
-            ctx.shadowBlur = particle.size * 2 * alpha;
+        // Only set shadow if needed (expensive operation) - reduced blur for performance
+        if (particle.glow && alpha > 0.4) {
+            ctx.shadowBlur = particle.size * 1.5 * alpha; // Reduced from 2x to 1.5x
             ctx.shadowColor = particle.color;
         } else {
             ctx.shadowBlur = 0;
