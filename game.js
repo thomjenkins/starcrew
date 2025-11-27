@@ -8980,7 +8980,7 @@ function gameLoop(currentTime = performance.now()) {
                 });
                 
                 // Send complete game state (host-authoritative approach)
-                networkManager.sendCompleteGameState({
+                const stateToSend = {
                     enemies: enemies,
                     asteroids: asteroids,
                     bosses: bosses,
@@ -8995,7 +8995,20 @@ function gameLoop(currentTime = performance.now()) {
                     level: gameState.level,
                     enemiesKilled: gameState.enemiesKilled,
                     effects: pendingEffects // Effects for non-host to render (explosions, sounds)
-                }, forceSync);
+                };
+                
+                // Debug: log what we're sending (throttled to avoid spam)
+                if (!window.lastStateSendLog || Date.now() - window.lastStateSendLog > 1000) {
+                    console.log('[HOST] Sending state:', {
+                        enemies: enemies.length,
+                        asteroids: asteroids.length,
+                        bullets: bullets.length,
+                        effects: pendingEffects.length
+                    });
+                    window.lastStateSendLog = Date.now();
+                }
+                
+                networkManager.sendCompleteGameState(stateToSend, forceSync);
                 
                 // Clear pending effects after sending
                 pendingEffects = [];
