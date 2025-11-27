@@ -1238,16 +1238,17 @@ function updatePlayer() {
     // Shooting (deterministic lockstep - both players process their own shooting)
     // Mouse button or spacebar for primary weapon
     // Check cooldown BEFORE decrementing to prevent spam
-    if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0 && weapons.primary.ammo > 0) {
+    // Use <= 0 instead of === 0 to handle floating point precision issues
+    if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown <= 0 && weapons.primary.ammo > 0) {
         shoot('primary');
     }
-    if (keys['1'] && weapons.missile.cooldown === 0 && weapons.missile.ammo > 0) {
+    if (keys['1'] && weapons.missile.cooldown <= 0 && weapons.missile.ammo > 0) {
         shoot('missile');
     }
-    if (keys['2'] && weapons.laser.cooldown === 0 && weapons.laser.ammo > 0) {
+    if (keys['2'] && weapons.laser.cooldown <= 0 && weapons.laser.ammo > 0) {
         shoot('laser');
     }
-    if (keys['3'] && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
+    if (keys['3'] && weapons.cluster.cooldown <= 0 && weapons.cluster.ammo > 0) {
         shoot('cluster');
     }
 
@@ -1263,6 +1264,10 @@ function updatePlayer() {
             // Always decrease by at least 1, faster with crew
             const decreaseAmount = 1 / cooldownMultiplier;
             weapons[weapon].cooldown = Math.max(0, weapons[weapon].cooldown - decreaseAmount);
+            // Ensure cooldown is exactly 0 when it reaches or goes below 0 (fix floating point issues)
+            if (weapons[weapon].cooldown <= 0) {
+                weapons[weapon].cooldown = 0;
+            }
         }
     });
     
@@ -1314,7 +1319,8 @@ function shoot(weaponType) {
     const weapon = weapons[weaponType];
     
     // Double-check cooldown to prevent spam (defensive programming)
-    if (weapon.cooldown > 0 || weapon.ammo <= 0) return;
+    // Use > 0.01 instead of > 0 to handle floating point precision issues
+    if (weapon.cooldown > 0.01 || weapon.ammo <= 0) return;
 
     // Set cooldown IMMEDIATELY to prevent rapid-fire spam
     // This must happen before any other logic to ensure rate limiting
