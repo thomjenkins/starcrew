@@ -8980,13 +8980,16 @@ function gameLoop(currentTime = performance.now()) {
                 });
                 
                 // Send complete game state (host-authoritative approach)
+                // Limit particles to reduce payload size (keep only recent ones)
+                const limitedParticles = particles.slice(-50); // Max 50 particles
+                
                 const stateToSend = {
                     enemies: enemies,
                     asteroids: asteroids,
                     bosses: bosses,
                     bullets: bullets, // All bullets (player, enemy, ally)
                     allies: allies,
-                    particles: particles,
+                    particles: limitedParticles, // Limited to reduce payload
                     powerups: powerups,
                     nebulas: nebulas,
                     cargoVessel: gameState.gameMode === 'mission' ? cargoVessel : null,
