@@ -5521,22 +5521,26 @@ function drawRemotePlayers() {
                 new Float32Array([healthR, healthG, 0, 1])
             );
             
-            // Draw remote player ship (different color to distinguish)
-            // Always draw a visible fallback first, then try texture
-            const remoteColor = new Float32Array([1.0, 0.6, 0.2, 1.0]); // Bright orange
+            // Draw remote player ship with orange circle indicator (like shield)
+            const indicatorRadius = player.width / 2 + 18; // Same size as shield
             
-            // Always draw a fallback rectangle first to ensure visibility
-            spriteRenderer.drawRect(
-                remotePlayer.x - player.width / 2,
-                remotePlayer.y - player.height / 2,
-                player.width,
-                player.height,
-                new Float32Array([1.0, 0.6, 0.2, 0.9]) // Bright orange background
-            );
+            // Draw orange circle indicator (two rings like the shield)
+            circleRenderer.begin();
             
-            // Then try to draw the ship texture on top if available
-            // Check if texture exists and is valid
+            // Outer ring - thicker, softer glow
+            const outerRingColor = new Float32Array([1.0, 0.6, 0.2, 0.6]); // Orange
+            circleRenderer.drawCircle(remotePlayer.x, remotePlayer.y, indicatorRadius + 2, outerRingColor);
+            
+            // Inner ring - thinner, brighter
+            const innerRingColor = new Float32Array([1.0, 0.7, 0.3, 0.9]); // Brighter orange
+            circleRenderer.drawCircle(remotePlayer.x, remotePlayer.y, indicatorRadius - 1, innerRingColor);
+            
+            circleRenderer.end();
+            
+            // Draw the ship texture on top if available
+            const remoteColor = new Float32Array([1.0, 0.6, 0.2, 1.0]); // Orange tint
             if (textures.ship && spriteRenderer.gl && spriteRenderer.gl.isTexture(textures.ship)) {
+                spriteRenderer.begin();
                 spriteRenderer.drawSprite(
                     textures.ship,  // texture first!
                     remotePlayer.x, remotePlayer.y,
@@ -5545,6 +5549,7 @@ function drawRemotePlayers() {
                     remoteColor,  // color
                     0.5, 0.5  // origin
                 );
+                spriteRenderer.end();
             }
         });
         
@@ -5574,19 +5579,32 @@ function drawRemotePlayers() {
             ctx.fillStyle = `rgb(${Math.floor(healthR * 255)}, ${Math.floor(healthG * 255)}, 0)`;
             ctx.fillRect(-barWidth / 2, barY, barWidth * healthPercent, barHeight);
             
-            // Draw remote player ship (orange tint)
-            // Always draw a visible fallback first
+            // Draw orange circle indicator (like shield) before ship
+            const indicatorRadius = player.width / 2 + 18; // Same size as shield
+            
+            // Outer ring - thicker, softer glow
+            ctx.strokeStyle = 'rgba(255, 180, 80, 0.6)'; // Orange
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(0, 0, indicatorRadius + 2, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Inner ring - thinner, brighter
+            ctx.strokeStyle = 'rgba(255, 200, 100, 0.9)'; // Brighter orange
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, indicatorRadius - 1, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Draw the ship image on top if available
             ctx.globalCompositeOperation = 'source-over';
             ctx.globalAlpha = 1;
             
-            // Draw orange background rectangle first (always visible)
-            ctx.fillStyle = 'rgba(255, 150, 50, 0.9)'; // Bright orange
-            ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
-            
-            // Then draw the ship image on top if available
             if (playerShipImageLoaded && playerShipImage) {
-                // Draw the ship image
+                // Draw the ship image with orange tint
                 ctx.globalCompositeOperation = 'multiply';
+                ctx.fillStyle = 'rgba(255, 180, 80, 0.5)'; // Orange tint
+                ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
                 ctx.drawImage(
                     playerShipImage,
                     -player.width / 2,
@@ -5595,20 +5613,6 @@ function drawRemotePlayers() {
                     player.height
                 );
                 ctx.globalCompositeOperation = 'source-over';
-            } else {
-                // Fallback: draw orange triangle shape on top of rectangle
-                ctx.fillStyle = '#ffaa66'; // Lighter orange
-                ctx.beginPath();
-                ctx.moveTo(0, -player.height / 2);
-                ctx.lineTo(-player.width / 2, player.height / 2);
-                ctx.lineTo(0, player.height / 2 - 5);
-                ctx.lineTo(player.width / 2, player.height / 2);
-                ctx.closePath();
-                ctx.fill();
-                
-                ctx.strokeStyle = '#ffcc88';
-                ctx.lineWidth = 2;
-                ctx.stroke();
             }
             
             ctx.restore();
