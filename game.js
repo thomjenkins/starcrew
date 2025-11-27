@@ -3569,17 +3569,19 @@ async function autopilotStep() {
             const reward = calculateReward(prevScore, prevHealth, prevShields, prevCargoHealth);
             const done = player.health <= 0;
             
-            // Store experience for training
+            // Store experience for training (only if agent supports it)
             // Note: We're using heuristic actions, so the model learns from expert demonstrations
             // This is behavioral cloning in real-time - the model learns that heuristic actions are good
-            rlAgent.storeExperience(
-                lastObservation,
-                lastAction,
-                reward,
-                lastValue,
-                lastLogProb,
-                done
-            );
+            if (rlAgent instanceof PPOAgent && typeof rlAgent.storeExperience === 'function') {
+                rlAgent.storeExperience(
+                    lastObservation,
+                    lastAction,
+                    reward,
+                    lastValue,
+                    lastLogProb,
+                    done
+                );
+            }
         }
         
         // Update previous state (only if not paused, or if it's an upgrade action)
