@@ -71,12 +71,16 @@ export class NetworkManager {
                 hostId: this.playerId,
                 createdAt: firebase.database.ServerValue.TIMESTAMP,
                 gameSeed: gameSeed, // Shared seed for deterministic RNG
+                gameTick: 0, // Start at tick 0 for lockstep
                 gameState: {
                     score: 0,
                     level: 1,
                     running: true
                 }
             });
+            
+            // Notify host about seed immediately
+            this.notifyListeners('gameSeedUpdated', { seed: gameSeed });
             
             // Add this player to the room
             await roomRef.child(`players/${this.playerId}`).set({
@@ -127,6 +131,13 @@ export class NetworkManager {
                 connected: true,
                 lastUpdate: firebase.database.ServerValue.TIMESTAMP
             });
+            
+            // Get game seed immediately when joining
+            const seedSnapshot = await roomRef.child('gameSeed').once('value');
+            if (seedSnapshot.exists()) {
+                const seed = seedSnapshot.val();
+                this.notifyListeners('gameSeedUpdated', { seed });
+            }
             
             // Set up listeners
             this.setupRoomListeners();

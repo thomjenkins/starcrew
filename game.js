@@ -1535,18 +1535,15 @@ function updateBullets() {
 
 // Spawn enemies
 function spawnEnemy() {
-    // In multiplayer, only host spawns enemies
-    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
-        return;
-    }
+    // In deterministic lockstep, both players spawn entities (same seed = same spawns)
     
     // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
     const creditDifficulty = cumulativeCredits / 100;
     const difficulty = creditDifficulty * 0.05;
-    const hue = Math.random() * 60;
+    const hue = getRandom() * 60;
     
     // Spawn from random edge (0=top, 1=right, 2=bottom, 3=left)
-    let edge = Math.floor(Math.random() * 4);
+    let edge = Math.floor(getRandom() * 4);
     let x, y, vx, vy;
     let attempts = 0;
     const maxAttempts = 20; // Increased attempts
@@ -1555,32 +1552,32 @@ function spawnEnemy() {
     // Try to spawn enemy at a position that's not too close to existing enemies
     do {
         // Add some randomization to spawn position to avoid exact overlaps
-        const edgeOffset = (Math.random() - 0.5) * 50; // Random offset along edge
+        const edgeOffset = (getRandom() - 0.5) * 50; // Random offset along edge
         
         switch(edge) {
             case 0: // Top
-                x = Math.max(30, Math.min(getCanvasWidth() - 30, Math.random() * getCanvasWidth() + edgeOffset));
+                x = Math.max(30, Math.min(getCanvasWidth() - 30, getRandom() * getCanvasWidth() + edgeOffset));
                 y = -30;
-                vx = (Math.random() - 0.5) * 1;
-                vy = 0.5 + Math.random() * 0.5;
+                vx = (getRandom() - 0.5) * 1;
+                vy = 0.5 + getRandom() * 0.5;
                 break;
             case 1: // Right
                 x = getCanvasWidth() + 30;
-                y = Math.max(30, Math.min(getCanvasHeight() - 30, Math.random() * getCanvasHeight() + edgeOffset));
-                vx = -(0.5 + Math.random() * 0.5);
-                vy = (Math.random() - 0.5) * 1;
+                y = Math.max(30, Math.min(getCanvasHeight() - 30, getRandom() * getCanvasHeight() + edgeOffset));
+                vx = -(0.5 + getRandom() * 0.5);
+                vy = (getRandom() - 0.5) * 1;
                 break;
             case 2: // Bottom
-                x = Math.max(30, Math.min(getCanvasWidth() - 30, Math.random() * getCanvasWidth() + edgeOffset));
+                x = Math.max(30, Math.min(getCanvasWidth() - 30, getRandom() * getCanvasWidth() + edgeOffset));
                 y = getCanvasHeight() + 30;
-                vx = (Math.random() - 0.5) * 1;
-                vy = -(0.5 + Math.random() * 0.5);
+                vx = (getRandom() - 0.5) * 1;
+                vy = -(0.5 + getRandom() * 0.5);
                 break;
             case 3: // Left
                 x = -30;
-                y = Math.max(30, Math.min(getCanvasHeight() - 30, Math.random() * getCanvasHeight() + edgeOffset));
-                vx = 0.5 + Math.random() * 0.5;
-                vy = (Math.random() - 0.5) * 1;
+                y = Math.max(30, Math.min(getCanvasHeight() - 30, getRandom() * getCanvasHeight() + edgeOffset));
+                vx = 0.5 + getRandom() * 0.5;
+                vy = (getRandom() - 0.5) * 1;
                 break;
         }
         attempts++;
@@ -1633,42 +1630,40 @@ function spawnEnemy() {
 // Spawn boss (appears every 1000 points)
 function spawnBoss() {
     // In multiplayer, only host spawns bosses
-    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
-        return;
-    }
+    // In deterministic lockstep, both players spawn entities (same seed = same spawns)
     
     // Difficulty scales with cumulative credits
     const creditDifficulty = cumulativeCredits / 100;
     const difficulty = creditDifficulty * 0.05;
     
     // Spawn from random edge
-    const edge = Math.floor(Math.random() * 4);
+    const edge = Math.floor(getRandom() * 4);
     let x, y, vx, vy;
     
     switch(edge) {
         case 0: // Top
-            x = getCanvasWidth() / 2 + (Math.random() - 0.5) * 200;
+            x = getCanvasWidth() / 2 + (getRandom() - 0.5) * 200;
             y = -50;
-            vx = (Math.random() - 0.5) * 0.5;
-            vy = 0.3 + Math.random() * 0.3;
+            vx = (getRandom() - 0.5) * 0.5;
+            vy = 0.3 + getRandom() * 0.3;
             break;
         case 1: // Right
             x = getCanvasWidth() + 50;
-            y = getCanvasHeight() / 2 + (Math.random() - 0.5) * 200;
-            vx = -(0.3 + Math.random() * 0.3);
-            vy = (Math.random() - 0.5) * 0.5;
+            y = getCanvasHeight() / 2 + (getRandom() - 0.5) * 200;
+            vx = -(0.3 + getRandom() * 0.3);
+            vy = (getRandom() - 0.5) * 0.5;
             break;
         case 2: // Bottom
-            x = getCanvasWidth() / 2 + (Math.random() - 0.5) * 200;
+            x = getCanvasWidth() / 2 + (getRandom() - 0.5) * 200;
             y = getCanvasHeight() + 50;
-            vx = (Math.random() - 0.5) * 0.5;
-            vy = -(0.3 + Math.random() * 0.3);
+            vx = (getRandom() - 0.5) * 0.5;
+            vy = -(0.3 + getRandom() * 0.3);
             break;
         case 3: // Left
             x = -50;
-            y = getCanvasHeight() / 2 + (Math.random() - 0.5) * 200;
-            vx = 0.3 + Math.random() * 0.3;
-            vy = (Math.random() - 0.5) * 0.5;
+            y = getCanvasHeight() / 2 + (getRandom() - 0.5) * 200;
+            vx = 0.3 + getRandom() * 0.3;
+            vy = (getRandom() - 0.5) * 0.5;
             break;
     }
     
@@ -1705,25 +1700,22 @@ function spawnBoss() {
 
 // Spawn asteroids
 function spawnAsteroid() {
-    // In multiplayer, only host spawns asteroids
-    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
-        return;
-    }
+    // In deterministic lockstep, both players spawn entities (same seed = same spawns)
     
-    const size = 20 + Math.random() * 40;
+    const size = 20 + getRandom() * 40;
     // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
     const creditDifficulty = cumulativeCredits / 100;
     const difficulty = creditDifficulty * 0.05; // More gradual speed increase
     asteroids.push({
-        id: 'asteroid_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9), // Unique ID for multiplayer sync
-        x: Math.random() * getCanvasWidth(),
+        id: 'asteroid_' + Date.now() + '_' + getRandom().toString(36).substr(2, 9), // Unique ID for multiplayer sync
+        x: getRandom() * getCanvasWidth(),
         y: -size,
         width: size,
         height: size,
-        vx: (Math.random() - 0.5) * 3,
-        vy: 0.5 + Math.random() * 1.5 + difficulty, // Start slower
-        rotation: Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 0.1,
+        vx: (getRandom() - 0.5) * 3,
+        vy: 0.5 + getRandom() * 1.5 + difficulty, // Start slower
+        rotation: getRandom() * Math.PI * 2,
+        rotationSpeed: (getRandom() - 0.5) * 0.1,
         health: size * 2 + creditDifficulty * 2, // More gradual health increase
         maxHealth: size * 2 + creditDifficulty * 2,
         color: '#888',
@@ -1732,10 +1724,10 @@ function spawnAsteroid() {
     
     // Generate random asteroid shape
     const asteroid = asteroids[asteroids.length - 1];
-    const pointCount = 8 + Math.floor(Math.random() * 4);
+    const pointCount = 8 + Math.floor(getRandom() * 4);
     for (let i = 0; i < pointCount; i++) {
         const angle = (i / pointCount) * Math.PI * 2;
-        const radius = asteroid.width / 2 * (0.7 + Math.random() * 0.3);
+        const radius = asteroid.width / 2 * (0.7 + getRandom() * 0.3);
         asteroid.points.push({
             angle: angle,
             radius: radius
@@ -1745,79 +1737,76 @@ function spawnAsteroid() {
 
 // Spawn nebulas
 function spawnNebula() {
-    // In multiplayer, only host spawns nebulas
-    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
-        return;
-    }
+    // In deterministic lockstep, both players spawn entities (same seed = same spawns)
     
-    const size = 100 + Math.random() * 150; // Slightly larger for more impressive clouds
+    const size = 100 + getRandom() * 150; // Slightly larger for more impressive clouds
     
     // Colorful palette: blues, cyans, purples, magentas, reds, and pinks
     // Hue range: 0-360 (full spectrum, but focusing on cool colors and warm reds/pinks)
-    const colorType = Math.random();
+    const colorType = getRandom();
     let hue, saturation, lightness;
     
     if (colorType < 0.2) {
         // Light blue/cyan (180-220) - vibrant blues
-        hue = 180 + Math.random() * 40;
-        saturation = 80 + Math.random() * 20; // 80-100% - very saturated
-        lightness = 55 + Math.random() * 20; // 55-75% - bright
+        hue = 180 + getRandom() * 40;
+        saturation = 80 + getRandom() * 20; // 80-100% - very saturated
+        lightness = 55 + getRandom() * 20; // 55-75% - bright
     } else if (colorType < 0.4) {
         // Bright cyan/blue (200-240) - very vibrant
-        hue = 200 + Math.random() * 40;
-        saturation = 85 + Math.random() * 15; // 85-100% - very saturated
-        lightness = 60 + Math.random() * 20; // 60-80% - bright
+        hue = 200 + getRandom() * 40;
+        saturation = 85 + getRandom() * 15; // 85-100% - very saturated
+        lightness = 60 + getRandom() * 20; // 60-80% - bright
     } else if (colorType < 0.6) {
         // Purple/indigo (240-280) - vibrant purples
-        hue = 240 + Math.random() * 40;
-        saturation = 80 + Math.random() * 20; // 80-100% - very saturated
-        lightness = 55 + Math.random() * 20; // 55-75% - bright
+        hue = 240 + getRandom() * 40;
+        saturation = 80 + getRandom() * 20; // 80-100% - very saturated
+        lightness = 55 + getRandom() * 20; // 55-75% - bright
     } else if (colorType < 0.75) {
         // Magenta/pink (280-320) - vibrant magentas and pinks
-        hue = 280 + Math.random() * 40;
-        saturation = 85 + Math.random() * 15; // 85-100% - very saturated
-        lightness = 60 + Math.random() * 20; // 60-80% - bright
+        hue = 280 + getRandom() * 40;
+        saturation = 85 + getRandom() * 15; // 85-100% - very saturated
+        lightness = 60 + getRandom() * 20; // 60-80% - bright
     } else if (colorType < 0.9) {
         // Light red/pink (0-30 and 330-360) - warm reds and pinks
         // Wrap around the hue circle for reds
-        hue = Math.random() < 0.5 ? Math.random() * 30 : 330 + Math.random() * 30;
-        saturation = 75 + Math.random() * 20; // 75-95% - very saturated
-        lightness = 60 + Math.random() * 20; // 60-80% - bright
+        hue = getRandom() < 0.5 ? getRandom() * 30 : 330 + getRandom() * 30;
+        saturation = 75 + getRandom() * 20; // 75-95% - very saturated
+        lightness = 60 + getRandom() * 20; // 60-80% - bright
     } else {
         // Light purple (270-300) - soft purples
-        hue = 270 + Math.random() * 30;
-        saturation = 70 + Math.random() * 25; // 70-95% - saturated
-        lightness = 65 + Math.random() * 15; // 65-80% - very light
+        hue = 270 + getRandom() * 30;
+        saturation = 70 + getRandom() * 25; // 70-95% - saturated
+        lightness = 65 + getRandom() * 15; // 65-80% - very light
     }
     
     // Spawn from a random edge of the screen
-    const edge = Math.floor(Math.random() * 4); // 0=top, 1=right, 2=bottom, 3=left
+    const edge = Math.floor(getRandom() * 4); // 0=top, 1=right, 2=bottom, 3=left
     let x, y, vx, vy;
     
     switch(edge) {
         case 0: // Top
-            x = Math.random() * getCanvasWidth();
+            x = getRandom() * getCanvasWidth();
             y = -size / 2;
-            vx = (Math.random() - 0.5) * 0.5;
-            vy = 0.3 + Math.random() * 0.3; // Move downward
+            vx = (getRandom() - 0.5) * 0.5;
+            vy = 0.3 + getRandom() * 0.3; // Move downward
             break;
         case 1: // Right
             x = getCanvasWidth() + size / 2;
-            y = Math.random() * getCanvasHeight();
-            vx = -(0.3 + Math.random() * 0.3); // Move leftward
-            vy = (Math.random() - 0.5) * 0.5;
+            y = getRandom() * getCanvasHeight();
+            vx = -(0.3 + getRandom() * 0.3); // Move leftward
+            vy = (getRandom() - 0.5) * 0.5;
             break;
         case 2: // Bottom
-            x = Math.random() * getCanvasWidth();
+            x = getRandom() * getCanvasWidth();
             y = getCanvasHeight() + size / 2;
-            vx = (Math.random() - 0.5) * 0.5;
-            vy = -(0.3 + Math.random() * 0.3); // Move upward
+            vx = (getRandom() - 0.5) * 0.5;
+            vy = -(0.3 + getRandom() * 0.3); // Move upward
             break;
         case 3: // Left
             x = -size / 2;
-            y = Math.random() * getCanvasHeight();
-            vx = 0.3 + Math.random() * 0.3; // Move rightward
-            vy = (Math.random() - 0.5) * 0.5;
+            y = getRandom() * getCanvasHeight();
+            vx = 0.3 + getRandom() * 0.3; // Move rightward
+            vy = (getRandom() - 0.5) * 0.5;
             break;
     }
     
@@ -8793,9 +8782,10 @@ function setupMobileControls() {
 }
 
 // Game loop
-let lastSpawn = 0;
-let lastAsteroidSpawn = 0;
-let lastNebulaSpawn = 0;
+// Spawn timers based on gameTick for deterministic lockstep
+let lastSpawnTick = 0;
+let lastAsteroidSpawnTick = 0;
+let lastNebulaSpawnTick = 0;
 let lastBossSpawnScore = 0; // Track score when last boss was spawned
 let lastFrameTime = performance.now();
 const TARGET_FPS = 60; // Target frames per second
@@ -8868,47 +8858,50 @@ function gameLoop(currentTime = performance.now()) {
                 }
             }
             
-            // Spawning (time-based, not frame-based)
-            const now = Date.now();
-            // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
-            const creditDifficulty = cumulativeCredits / 100;
-            
-            // Maximum enemies on screen to prevent overwhelming swarms
-            const maxEnemiesOnScreen = Math.min(25, 4 + Math.floor(creditDifficulty * 0.8)); // Reduced from 8 to 4 at start, gradual increase to 25 max
-            
-            // More gradual spawn rate decrease - uses a smoother curve to prevent sudden jumps
-            // Formula: baseRate - (creditDifficulty^1.2 * ratePerLevel) for even smoother progression
-            const enemySpawnRate = Math.max(1200, 8000 - Math.pow(creditDifficulty, 1.2) * 40); // Increased from 4000 to 8000ms at start (8 seconds)
-            
-            // Only spawn if we're under the enemy cap
-            if (enemies.length < maxEnemiesOnScreen && now - lastSpawn > enemySpawnRate) {
-                spawnEnemy();
-                lastSpawn = now;
-            }
+            // Spawning (tick-based for deterministic lockstep)
+            // Only spawn if we have the seed in multiplayer (ensures determinism)
+            if (!multiplayerMode || (multiplayerMode && gameSeed !== null)) {
+                // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
+                const creditDifficulty = cumulativeCredits / 100;
+                
+                // Maximum enemies on screen to prevent overwhelming swarms
+                const maxEnemiesOnScreen = Math.min(25, 4 + Math.floor(creditDifficulty * 0.8)); // Reduced from 8 to 4 at start, gradual increase to 25 max
+                
+                // More gradual spawn rate decrease - uses a smoother curve to prevent sudden jumps
+                // Formula: baseRate - (creditDifficulty^1.2 * ratePerLevel) for even smoother progression
+                // Convert to ticks: 60 ticks per second (assuming 60fps fixed timestep)
+                const enemySpawnRateTicks = Math.max(72, 480 - Math.floor(Math.pow(creditDifficulty, 1.2) * 2.4)); // ~8 seconds = 480 ticks at 60fps
+                
+                // Only spawn if we're under the enemy cap
+                if (enemies.length < maxEnemiesOnScreen && gameTick - lastSpawnTick >= enemySpawnRateTicks) {
+                    spawnEnemy();
+                    lastSpawnTick = gameTick;
+                }
 
-            // Very gradual chance for extra spawn at high difficulty (only if under cap)
-            // This replaces the sudden threshold-based spawns with a smooth probability curve
-            if (enemies.length < maxEnemiesOnScreen && creditDifficulty > 10) {
-                // Probability increases very gradually: 0% at difficulty 10, up to 5% at difficulty 50
-                const extraSpawnChance = Math.min(0.05, (creditDifficulty - 10) / 800);
-                if (Math.random() < extraSpawnChance && now - lastSpawn > enemySpawnRate * 0.5) {
-                spawnEnemy();
-                    lastSpawn = now;
-            }
-            }
+                // Very gradual chance for extra spawn at high difficulty (only if under cap)
+                // This replaces the sudden threshold-based spawns with a smooth probability curve
+                if (enemies.length < maxEnemiesOnScreen && creditDifficulty > 10) {
+                    // Probability increases very gradually: 0% at difficulty 10, up to 5% at difficulty 50
+                    const extraSpawnChance = Math.min(0.05, (creditDifficulty - 10) / 800);
+                    if (getRandom() < extraSpawnChance && gameTick - lastSpawnTick >= enemySpawnRateTicks * 0.5) {
+                        spawnEnemy();
+                        lastSpawnTick = gameTick;
+                    }
+                }
 
-            // More gradual asteroid spawn rate - uses smoother curve
-            const asteroidSpawnRate = Math.max(1200, 4500 - Math.pow(creditDifficulty, 1.3) * 60);
-            if (now - lastAsteroidSpawn > asteroidSpawnRate) {
-                spawnAsteroid();
-                lastAsteroidSpawn = now;
-            }
+                // More gradual asteroid spawn rate - uses smoother curve
+                const asteroidSpawnRateTicks = Math.max(72, 270 - Math.floor(Math.pow(creditDifficulty, 1.3) * 3.6)); // ~4.5 seconds = 270 ticks
+                if (gameTick - lastAsteroidSpawnTick >= asteroidSpawnRateTicks) {
+                    spawnAsteroid();
+                    lastAsteroidSpawnTick = gameTick;
+                }
 
-            // Spawn nebulas (less frequent, but persistent) - more gradual
-            const nebulaSpawnRate = Math.max(10000, 18000 - Math.pow(creditDifficulty, 1.2) * 200);
-            if (now - lastNebulaSpawn > nebulaSpawnRate) {
-                spawnNebula();
-                lastNebulaSpawn = now;
+                // Spawn nebulas (less frequent, but persistent) - more gradual
+                const nebulaSpawnRateTicks = Math.max(600, 1080 - Math.floor(Math.pow(creditDifficulty, 1.2) * 12)); // ~18 seconds = 1080 ticks
+                if (gameTick - lastNebulaSpawnTick >= nebulaSpawnRateTicks) {
+                    spawnNebula();
+                    lastNebulaSpawnTick = gameTick;
+                }
             }
 
             // Spawn boss every 1000 points (only one boss at a time)
@@ -9135,6 +9128,11 @@ function restartGame() {
     // Reset game tick and input queue for lockstep
     gameTick = 0;
     inputQueue = [];
+    
+    // Reset spawn timers for deterministic lockstep
+    lastSpawnTick = 0;
+    lastAsteroidSpawnTick = 0;
+    lastNebulaSpawnTick = 0;
     
     // Reset high score flag and clear fireworks
     newHighScore = false;
@@ -9409,10 +9407,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Listen for game seed (deterministic lockstep)
     networkManager.on('gameSeedUpdated', (data) => {
-        if (data.seed && gameSeed === null) {
+        if (data.seed) {
+            const wasNull = gameSeed === null;
             gameSeed = data.seed;
             deterministicRNG = new DeterministicRNG(gameSeed);
             console.log('[LOCKSTEP] Game seed received:', gameSeed);
+            
+            // Reset game tick when seed is first received to ensure sync
+            // This ensures non-host players start at the same tick as host
+            if (wasNull) {
+                console.log('[LOCKSTEP] Initializing with seed, resetting game state for sync');
+                gameTick = 0;
+                lastSpawnTick = 0;
+                lastAsteroidSpawnTick = 0;
+                lastNebulaSpawnTick = 0;
+                
+                // Clear all entities to start fresh
+                enemies = [];
+                asteroids = [];
+                nebulas = [];
+                bosses = [];
+                bullets = [];
+                allies = [];
+                powerups = [];
+                
+                // Reset game state
+                gameState.score = 0;
+                gameState.level = 1;
+                gameState.enemiesKilled = 0;
+                cumulativeCredits = 0;
+            }
         }
     });
     
@@ -9442,7 +9466,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
     
-    // Listen for game entity updates (enemies, asteroids, bosses, cargo vessel) from host
+    // Listen for game entity updates (DISABLED in deterministic lockstep)
+    // In lockstep, both players generate entities themselves, so no entity sync needed
+    /*
     networkManager.on('gameEntitiesUpdated', (data) => {
         if (data.entities) {
             // Preserve tractor beam target if active
@@ -9507,10 +9533,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 cargoVessel = data.entities.cargoVessel;
             }
         }
-    });
+    }); // END OF DISABLED gameEntitiesUpdated listener
     
-    // Listen for complete game state updates (new host-authoritative approach)
-    // For non-host players, this replaces all game state from host
+    // Listen for complete game state updates (DISABLED in deterministic lockstep)
+    // In lockstep, both players generate entities themselves, so no state sync needed
+    /*
     networkManager.on('completeGameStateUpdated', (data) => {
         if (data.completeState && !networkManager.isHostPlayer()) {
             // Debug: log state sync
@@ -9584,6 +9611,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
     });
+    */ // END OF DISABLED completeGameStateUpdated listener
     
     // Preload RL agent in background so it's ready when autopilot is toggled
     // This prevents delay on first autopilot click
