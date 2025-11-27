@@ -235,6 +235,7 @@ let remoteCrewAllocations = new Map(); // Remote players' crew allocations: {pla
 let remoteAllies = new Map(); // Remote allies: {playerId: [ally1, ally2, ...]}
 let remoteBullets = new Map(); // Remote bullets: {playerId: [bullet1, bullet2, ...]}
 let previousRemoteAllies = new Map(); // Track previous ally states to detect destruction
+let remotePlayerWeapons = new Map(); // Track remote player weapon states: {playerId: {primary: {cooldown, ammo}, ...}}
 
 // Firebase configuration
 const firebaseConfig = {
@@ -1171,18 +1172,22 @@ function updatePlayer() {
     });
 
     // Shooting (only if autopilot is off, or if autopilot triggered it)
-    // Mouse button or spacebar for primary weapon
-    if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0) {
-        shoot('primary');
-    }
-    if (keys['1'] && weapons.missile.cooldown === 0 && weapons.missile.ammo > 0) {
-        shoot('missile');
-    }
-    if (keys['2'] && weapons.laser.cooldown === 0 && weapons.laser.ammo > 0) {
-        shoot('laser');
-    }
-    if (keys['3'] && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
-        shoot('cluster');
+    // For non-host players in multiplayer, shooting is handled by host
+    // Host processes input and creates bullets, so non-host players don't create bullets locally
+    if (!multiplayerMode || !networkManager || networkManager.isHostPlayer()) {
+        // Mouse button or spacebar for primary weapon
+        if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0) {
+            shoot('primary');
+        }
+        if (keys['1'] && weapons.missile.cooldown === 0 && weapons.missile.ammo > 0) {
+            shoot('missile');
+        }
+        if (keys['2'] && weapons.laser.cooldown === 0 && weapons.laser.ammo > 0) {
+            shoot('laser');
+        }
+        if (keys['3'] && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
+            shoot('cluster');
+        }
     }
     
     // Send player input/position to network if in multiplayer mode
@@ -4859,6 +4864,187 @@ function updateTractorBeam() {
     }
 }
 
+// Process remote players' shooting input and create bullets on host (host only)
+function processRemotePlayerShooting() {
+    if (!multiplayerMode || !networkManager || !networkManager.isHostPlayer()) {
+        return;
+    }
+    
+    remotePlayers.forEach((remotePlayer, playerId) => {
+        // Initialize weapon state for this player if not exists
+        if (!remotePlayerWeapons.has(playerId)) {
+            remotePlayerWeapons.set(playerId, {
+                primary: { cooldown: 0, ammo: Infinity },
+                missile: { cooldown: 0, ammo: 5 },
+                laser: { cooldown: 0, ammo: 3 },
+                cluster: { cooldown: 0, ammo: 0 }
+            });
+        }
+        
+        const playerWeapons = remotePlayerWeapons.get(playerId);
+        
+        // Update weapon cooldowns
+        Object.keys(playerWeapons).forEach(weaponType => {
+            if (playerWeapons[weaponType].cooldown > 0) {
+                playerWeapons[weaponType].cooldown--;
+            }
+        });
+        
+        // Process shooting input from remote player
+        if (remotePlayer.keys) {
+            const keys = remotePlayer.keys;
+            const playerX = remotePlayer.x;
+            const playerY = remotePlayer.y;
+            const playerRotation = remotePlayer.rotation;
+            
+            // Primary weapon (space or mouse button)
+            if ((keys.space || keys.mouseButton) && playerWeapons.primary.cooldown === 0) {
+                playerWeapons.primary.cooldown = weapons.primary.maxCooldown;
+                
+                const baseSpeed = 8;
+                const vx = Math.sin(playerRotation) * baseSpeed;
+                const vy = -Math.cos(playerRotation) * baseSpeed;
+                const bulletX = playerX + Math.sin(playerRotation) * (player.height / 2);
+                const bulletY = playerY - Math.cos(playerRotation) * (player.height / 2);
+                
+                let damage = weapons.primary.damage;
+                // Apply upgrades (assume same upgrades for all players for simplicity)
+                damage = damage * (1 + upgrades.primaryDamage.level * 0.1);
+                
+                bullets.push({
+                    x: bulletX,
+                    y: bulletY,
+                    vx: vx,
+                    vy: vy,
+                    damage: damage,
+                    color: weapons.primary.color,
+                    size: 4,
+                    type: 'primary',
+                    glow: true,
+                    playerId: playerId // Mark which player shot this
+                });
+                
+                // Upgraded primary fires multiple shots
+                if (upgrades.primaryDamage.level >= 2) {
+                    const spreadAngle = 0.2;
+                    bullets.push({
+                        x: bulletX,
+                        y: bulletY,
+                        vx: Math.sin(playerRotation - spreadAngle) * baseSpeed,
+                        vy: -Math.cos(playerRotation - spreadAngle) * baseSpeed,
+                        damage: damage * 0.8,
+                        color: weapons.primary.color,
+                        size: 4,
+                        type: 'primary',
+                        glow: true,
+                        playerId: playerId
+                    });
+                    bullets.push({
+                        x: bulletX,
+                        y: bulletY,
+                        vx: Math.sin(playerRotation + spreadAngle) * baseSpeed,
+                        vy: -Math.cos(playerRotation + spreadAngle) * baseSpeed,
+                        damage: damage * 0.8,
+                        color: weapons.primary.color,
+                        size: 4,
+                        type: 'primary',
+                        glow: true,
+                        playerId: playerId
+                    });
+                }
+            }
+            
+            // Missile (key 1)
+            if (keys.key1 && playerWeapons.missile.cooldown === 0 && playerWeapons.missile.ammo > 0) {
+                playerWeapons.missile.cooldown = weapons.missile.maxCooldown;
+                playerWeapons.missile.ammo--;
+                
+                const baseSpeed = 10;
+                const vx = Math.sin(playerRotation) * baseSpeed;
+                const vy = -Math.cos(playerRotation) * baseSpeed;
+                const bulletX = playerX + Math.sin(playerRotation) * (player.height / 2);
+                const bulletY = playerY - Math.cos(playerRotation) * (player.height / 2);
+                
+                let damage = weapons.missile.damage;
+                damage = damage * (1 + upgrades.primaryDamage.level * 0.1);
+                
+                bullets.push({
+                    x: bulletX,
+                    y: bulletY,
+                    vx: vx,
+                    vy: vy,
+                    damage: damage,
+                    color: weapons.missile.color,
+                    size: 8,
+                    type: 'missile',
+                    homing: true,
+                    glow: true,
+                    trail: [],
+                    playerId: playerId
+                });
+            }
+            
+            // Laser (key 2)
+            if (keys.key2 && playerWeapons.laser.cooldown === 0 && playerWeapons.laser.ammo > 0) {
+                playerWeapons.laser.cooldown = weapons.laser.maxCooldown;
+                playerWeapons.laser.ammo--;
+                
+                const baseSpeed = 15;
+                const vx = Math.sin(playerRotation) * baseSpeed;
+                const vy = -Math.cos(playerRotation) * baseSpeed;
+                const bulletX = playerX + Math.sin(playerRotation) * (player.height / 2);
+                const bulletY = playerY - Math.cos(playerRotation) * (player.height / 2);
+                
+                let damage = weapons.laser.damage;
+                damage = damage * (1 + upgrades.primaryDamage.level * 0.1);
+                
+                bullets.push({
+                    x: bulletX,
+                    y: bulletY,
+                    vx: vx,
+                    vy: vy,
+                    damage: damage,
+                    color: weapons.laser.color,
+                    size: 6,
+                    type: 'laser',
+                    pierce: true,
+                    glow: true,
+                    playerId: playerId
+                });
+            }
+            
+            // Cluster (key 3)
+            if (keys.key3 && playerWeapons.cluster.cooldown === 0 && playerWeapons.cluster.ammo > 0) {
+                playerWeapons.cluster.cooldown = weapons.cluster.maxCooldown;
+                playerWeapons.cluster.ammo--;
+                
+                const baseSpeed = 12;
+                const vx = Math.sin(playerRotation) * baseSpeed;
+                const vy = -Math.cos(playerRotation) * baseSpeed;
+                const bulletX = playerX + Math.sin(playerRotation) * (player.height / 2);
+                const bulletY = playerY - Math.cos(playerRotation) * (player.height / 2);
+                
+                let damage = weapons.cluster.damage;
+                damage = damage * (1 + upgrades.primaryDamage.level * 0.1);
+                
+                bullets.push({
+                    x: bulletX,
+                    y: bulletY,
+                    vx: vx,
+                    vy: vy,
+                    damage: damage,
+                    color: weapons.cluster.color,
+                    size: 10,
+                    type: 'cluster',
+                    glow: true,
+                    clusterSpread: true,
+                    playerId: playerId
+                });
+            }
+        }
+    });
+}
+
 // Process remote players' bullets for damage (host only)
 // Note: Bullet positions are updated by the owner and synced via network
 // This function only processes collisions for damage
@@ -6052,7 +6238,7 @@ function drawBullets() {
     } else if (ctx) {
         // Canvas 2D fallback
         // Draw local bullets
-        bullets.forEach(bullet => {
+    bullets.forEach(bullet => {
         ctx.save();
         
         if (bullet.glow) {
@@ -6135,7 +6321,7 @@ function drawBullets() {
         }
         
         ctx.restore();
-        });
+    });
         
         // Draw remote bullets
         remoteBullets.forEach((remoteBulletsList, playerId) => {
@@ -6878,9 +7064,9 @@ function drawAllies() {
     } else if (ctx) {
         // Canvas 2D fallback
         // Draw local allies
-        allies.forEach(ally => {
-            ctx.save();
-            ctx.translate(ally.x, ally.y);
+    allies.forEach(ally => {
+        ctx.save();
+        ctx.translate(ally.x, ally.y);
             ctx.rotate(ally.rotation);
             
             // Draw ally ship image if loaded
@@ -6894,15 +7080,15 @@ function drawAllies() {
                 );
             } else {
                 // Fallback drawn shape
-                ctx.shadowBlur = 10;
-                ctx.shadowColor = '#00ff00';
-                
-                const allyGradient = ctx.createLinearGradient(-ally.width / 2, -ally.height / 2, 0, ally.height / 2);
-                allyGradient.addColorStop(0, '#00aa00');
-                allyGradient.addColorStop(0.5, '#00ff00');
-                allyGradient.addColorStop(1, '#006600');
-                
-                ctx.fillStyle = allyGradient;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#00ff00';
+        
+        const allyGradient = ctx.createLinearGradient(-ally.width / 2, -ally.height / 2, 0, ally.height / 2);
+        allyGradient.addColorStop(0, '#00aa00');
+        allyGradient.addColorStop(0.5, '#00ff00');
+        allyGradient.addColorStop(1, '#006600');
+        
+        ctx.fillStyle = allyGradient;
         ctx.beginPath();
         ctx.moveTo(0, -ally.height / 2);
         ctx.lineTo(-ally.width / 2, ally.height / 2);
@@ -7427,7 +7613,7 @@ function updateCrewAllocation() {
 function openCommandModule() {
     // Don't pause the game in multiplayer - it should continue running for both players
     if (!multiplayerMode || !networkManager || !networkManager.isConnected()) {
-        gameState.paused = true;
+    gameState.paused = true;
     }
     gameState.commandModuleOpen = true;
     document.getElementById('commandModule').classList.remove('hidden');
@@ -8708,7 +8894,10 @@ function updateGameStep() {
     
     // Host processes remote players' actions
     if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
-        processRemoteBullets();
+        processRemotePlayerShooting(); // Process shooting input and create bullets on host
+        // Note: Bullets created by remote players are now in the main bullets array
+        // and will be processed by normal collision detection in updateBullets()
+        // processRemoteBullets() is no longer needed since bullets are created on host
         processRemoteTractorBeams();
     }
     
@@ -9086,6 +9275,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         remoteAllies.delete(data.playerId);
         remoteBullets.delete(data.playerId);
         previousRemoteAllies.delete(data.playerId); // Clean up tracking
+        remotePlayerWeapons.delete(data.playerId); // Clean up weapon state
         updatePlayerCountUI();
         
         // Update UI if command module is open
