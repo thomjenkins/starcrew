@@ -254,15 +254,17 @@ export class NetworkManager {
     
     /**
      * Send game entities (enemies, asteroids) - host only
+     * @param {Object} entities - The entities to send
+     * @param {boolean} force - If true, bypass throttle for immediate sync
      */
-    async sendGameEntities(entities) {
+    async sendGameEntities(entities, force = false) {
         if (!this.connected || !this.isHost || !this.db || !this.roomId) {
             return;
         }
         
         const now = Date.now();
-        if (now - this.lastEntitySent < this.entityThrottle) {
-            return; // Throttle updates
+        if (!force && now - this.lastEntitySent < this.entityThrottle) {
+            return; // Throttle updates (unless forced)
         }
         this.lastEntitySent = now;
         

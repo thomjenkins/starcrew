@@ -8557,12 +8557,44 @@ function gameLoop(currentTime = performance.now()) {
             
             // In multiplayer, host sends game entities (enemies, asteroids, bosses, cargo vessel) to clients
             if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
+                // Track if we need to force immediate sync (when entities are destroyed)
+                let forceSync = false;
+                
+                // Check if any entities were destroyed this frame by comparing counts
+                // This is a simple heuristic - if counts decreased, force sync
+                const currentEnemyCount = enemies.length;
+                const currentAsteroidCount = asteroids.length;
+                const currentBossCount = bosses.length;
+                
+                // Store previous counts (initialize if not exists)
+                if (typeof window.lastEntityCounts === 'undefined') {
+                    window.lastEntityCounts = {
+                        enemies: currentEnemyCount,
+                        asteroids: currentAsteroidCount,
+                        bosses: currentBossCount
+                    };
+                }
+                
+                // Force sync if any entity count decreased (entity was destroyed)
+                if (currentEnemyCount < window.lastEntityCounts.enemies ||
+                    currentAsteroidCount < window.lastEntityCounts.asteroids ||
+                    currentBossCount < window.lastEntityCounts.bosses) {
+                    forceSync = true;
+                }
+                
+                // Update stored counts
+                window.lastEntityCounts = {
+                    enemies: currentEnemyCount,
+                    asteroids: currentAsteroidCount,
+                    bosses: currentBossCount
+                };
+                
                 networkManager.sendGameEntities({
                     enemies: enemies,
                     asteroids: asteroids,
                     bosses: bosses,
                     cargoVessel: gameState.gameMode === 'mission' ? cargoVessel : null
-                });
+                }, forceSync);
             }
         } else {
             // Still update UI when paused (for visual feedback)
