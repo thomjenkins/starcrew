@@ -206,11 +206,15 @@ export class NetworkManager {
             });
         }
         
-        // Listen for events (playerDied, etc.) - all players listen
+        // Listen for events (playerDied, playerDamaged, etc.) - all players listen
         roomRef.child('events').on('child_added', (snapshot) => {
             const event = snapshot.val();
             if (event && event.type) {
-                // Process events from all players (callbacks will handle duplicate prevention)
+                // Check if event is targeted to a specific player
+                if (event.targetPlayerId && event.targetPlayerId !== this.playerId) {
+                    return; // This event is not for us
+                }
+                // Process events (either broadcast or targeted to us)
                 this.notifyListeners(event.type, { ...event.data, playerId: event.playerId } || {});
             }
         });
@@ -319,7 +323,7 @@ export class NetworkManager {
     /**
      * Send an event (shooting, powerup collection, etc.)
      */
-    async sendEvent(eventType, eventData) {
+    async sendEvent(eventType, eventData, targetPlayerId = null) {
         if (!this.connected || !this.db || !this.roomId) {
             return;
         }
@@ -329,6 +333,7 @@ export class NetworkManager {
             await eventsRef.push({
                 type: eventType,
                 playerId: this.playerId,
+                targetPlayerId: targetPlayerId, // Who should receive this event (null = broadcast)
                 data: eventData,
                 timestamp: firebase.database.ServerValue.TIMESTAMP
             });
