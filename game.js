@@ -84,6 +84,14 @@ function getRandomInt(min, max) {
     return Math.floor(min + Math.random() * (max - min));
 }
 
+// Helper to identify the current player for multiplayer payloads
+function getLocalPlayerId() {
+    if (multiplayerMode && networkManager && networkManager.isConnected()) {
+        return networkManager.getPlayerId();
+    }
+    return 'local';
+}
+
 // Game state
 let gameState = {
     running: true,
@@ -1297,11 +1305,13 @@ function updatePlayer() {
 // Shooting
 function shoot(weaponType) {
     const weapon = weapons[weaponType];
-    
+
     if (weapon.cooldown > 0 || weapon.ammo <= 0) return;
 
     weapon.cooldown = weapon.maxCooldown;
     if (weapon.ammo !== Infinity) weapon.ammo--;
+
+    const ownerId = getLocalPlayerId();
 
     let damage = weapon.damage * (1 + upgrades.primaryDamage.level * 0.1);
     // Apply weapons crew damage bonus
@@ -1331,7 +1341,8 @@ function shoot(weaponType) {
             color: weapon.color,
             size: 4,
             type: 'primary',
-            glow: true
+            glow: true,
+            playerId: ownerId
         });
         
         // Upgraded primary fires multiple shots
@@ -1346,7 +1357,8 @@ function shoot(weaponType) {
                 color: weapon.color,
                 size: 4,
                 type: 'primary',
-                glow: true
+                glow: true,
+                playerId: ownerId
             });
             bullets.push({
                 x: bulletX,
@@ -1357,7 +1369,8 @@ function shoot(weaponType) {
                 color: weapon.color,
                 size: 4,
                 type: 'primary',
-                glow: true
+                glow: true,
+                playerId: ownerId
             });
         }
     } else if (weaponType === 'missile') {
@@ -1373,7 +1386,8 @@ function shoot(weaponType) {
             type: 'missile',
             homing: true,
             glow: true,
-            trail: []
+            trail: [],
+            playerId: ownerId
         });
     } else if (weaponType === 'laser') {
         sounds.laserShot();
@@ -1387,7 +1401,8 @@ function shoot(weaponType) {
             size: 6,
             type: 'laser',
             pierce: true,
-            glow: true
+            glow: true,
+            playerId: ownerId
         });
     } else if (weaponType === 'cluster') {
         sounds.missileLaunch();
@@ -1401,13 +1416,16 @@ function shoot(weaponType) {
             size: 10,
             type: 'cluster',
             glow: true,
-            clusterSpread: true // Mark as cluster bullet
+            clusterSpread: true, // Mark as cluster bullet
+            playerId: ownerId
         });
     }
 }
 
 // Update bullets
 function updateBullets() {
+    const isAuthoritativeForDamage = !multiplayerMode || !networkManager || networkManager.isHostPlayer();
+
     bullets = bullets.filter(bullet => {
         // Update position for all bullets (including enemy bullets)
         bullet.x += bullet.vx;
@@ -1441,13 +1459,15 @@ function updateBullets() {
             for (let i = 0; i < enemies.length; i++) {
                 const enemy = enemies[i];
                 if (checkCollision(bullet, enemy)) {
-                    enemy.health -= bullet.damage;
-                    
+                    if (isAuthoritativeForDamage) {
+                        enemy.health -= bullet.damage;
+                    }
+
                     // Cluster weapon spread effect
                     if (bullet.type === 'cluster' && bullet.clusterSpread) {
                         createExplosion(bullet.x, bullet.y, 30);
                         sounds.enemyExplosion();
-                        
+
                         // Spread to nearby enemies
                         const spreadRadius = weapons.cluster.spreadRadius;
                         const spreadDamage = bullet.damage * 0.7; // 70% damage on spread
@@ -1456,16 +1476,18 @@ function updateBullets() {
                         // Function to recursively spread
                         function spreadCluster(centerX, centerY, depth) {
                             if (depth > 3) return; // Limit spread depth to prevent infinite loops
-                            
+
                             for (let j = 0; j < enemies.length; j++) {
                                 if (hitEnemies.has(j)) continue; // Skip already hit enemies
-                                
+
                                 const dist = Math.hypot(enemies[j].x - centerX, enemies[j].y - centerY);
                                 if (dist < spreadRadius) {
-                                    enemies[j].health -= spreadDamage;
+                                    if (isAuthoritativeForDamage) {
+                                        enemies[j].health -= spreadDamage;
+                                    }
                                     hitEnemies.add(j);
                                     createExplosion(enemies[j].x, enemies[j].y, 20);
-                                    
+
                                     // Continue spreading from this enemy
                                     spreadCluster(enemies[j].x, enemies[j].y, depth + 1);
                                 }
@@ -1493,7 +1515,9 @@ function updateBullets() {
             for (let i = 0; i < asteroids.length; i++) {
                 const asteroid = asteroids[i];
                 if (checkCollision(bullet, asteroid)) {
-                    asteroid.health -= bullet.damage;
+                    if (isAuthoritativeForDamage) {
+                        asteroid.health -= bullet.damage;
+                    }
                     if (!bullet.pierce || bullet.type === 'cluster') {
                         createExplosion(bullet.x, bullet.y, 10);
                         shouldRemove = true;
@@ -1513,7 +1537,9 @@ function updateBullets() {
                     // Nebuclear makes nebula disappear
                     createExplosion(bullet.x, bullet.y, 30);
                     sounds.enemyExplosion();
-                    nebulas.splice(i, 1);
+                    if (isAuthoritativeForDamage) {
+                        nebulas.splice(i, 1);
+                    }
                     i--; // Adjust index after removal
                     if (!bullet.pierce || bullet.type === 'cluster') {
                         shouldRemove = true;
@@ -5450,7 +5476,8 @@ function updateAllies() {
                     color: '#00ff00',
                     size: 4,
                     type: 'ally',
-                    glow: true
+                    glow: true,
+                    playerId: getLocalPlayerId()
                 });
             }
         } else {
@@ -9104,7 +9131,37 @@ function updateGameStep() {
                 targetId: tractorBeam.target ? tractorBeam.target.id || null : null,
                 targetType: tractorBeam.targetType || null,
                 charge: tractorBeam.charge
-            }
+            },
+            allies: allies.map(ally => ({
+                x: ally.x,
+                y: ally.y,
+                rotation: ally.rotation,
+                width: ally.width,
+                height: ally.height,
+                health: ally.health,
+                maxHealth: ally.maxHealth,
+                id: ally.id || null,
+                offsetAngle: ally.offsetAngle,
+                orbitRadius: ally.orbitRadius,
+                isCargoAlly: ally.isCargoAlly || false
+            })),
+            bullets: bullets
+                .filter(b => (b.playerId || 'local') === getLocalPlayerId())
+                .map(b => ({
+                    x: b.x,
+                    y: b.y,
+                    vx: b.vx,
+                    vy: b.vy,
+                    damage: b.damage,
+                    color: b.color,
+                    size: b.size,
+                    type: b.type,
+                    glow: b.glow,
+                    trail: b.trail || [],
+                    pierce: b.pierce || false,
+                    homing: b.homing || false,
+                    clusterSpread: b.clusterSpread || false
+                }))
         });
     }
 
