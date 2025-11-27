@@ -1185,56 +1185,70 @@ function updatePlayer() {
         shoot('cluster');
     }
     
-    // Send player state to network if in multiplayer mode
+    // Send player input/position to network if in multiplayer mode
     if (multiplayerMode && networkManager && networkManager.isConnected()) {
-        // Add playerId to each ally for identification
-        const alliesWithPlayerId = allies.map(ally => ({
-            ...ally,
-            playerId: networkManager.getPlayerId()
-        }));
-        
-        // Add playerId to each bullet for identification (include all bullets, including ally bullets)
-        const bulletsWithPlayerId = bullets.map(bullet => ({
-            ...bullet,
-            playerId: networkManager.getPlayerId()
-        }));
-        
-        // Prepare tractor beam state for sync
-        let tractorBeamState = null;
-        if (tractorBeam.active && tractorBeam.target) {
-            // Send target ID so host can find the target entity
-            tractorBeamState = {
-                active: true,
-                targetId: tractorBeam.target.id || null,
-                targetType: tractorBeam.targetType,
-                playerX: player.x,
-                playerY: player.y,
-                playerRotation: player.rotation
-            };
+        if (networkManager.isHostPlayer()) {
+            // Host sends full state (for other players to see)
+            const alliesWithPlayerId = allies.map(ally => ({
+                ...ally,
+                playerId: networkManager.getPlayerId()
+            }));
+            
+            const bulletsWithPlayerId = bullets.map(bullet => ({
+                ...bullet,
+                playerId: networkManager.getPlayerId()
+            }));
+            
+            let tractorBeamState = null;
+            if (tractorBeam.active && tractorBeam.target) {
+                tractorBeamState = {
+                    active: true,
+                    targetId: tractorBeam.target.id || null,
+                    targetType: tractorBeam.targetType,
+                    playerX: player.x,
+                    playerY: player.y,
+                    playerRotation: player.rotation
+                };
+            } else {
+                tractorBeamState = { active: false };
+            }
+            
+            networkManager.sendPlayerState({
+                x: player.x,
+                y: player.y,
+                rotation: player.rotation,
+                health: player.health,
+                maxHealth: player.maxHealth,
+                shields: player.shields,
+                maxShields: player.maxShields,
+                score: gameState.score,
+                cargoCrewAllocation: {
+                    engineering: cargoCrewAllocation.engineering.length,
+                    navigation: cargoCrewAllocation.navigation.length
+                },
+                allies: alliesWithPlayerId,
+                bullets: bulletsWithPlayerId,
+                tractorBeam: tractorBeamState
+            });
         } else {
-            tractorBeamState = { active: false };
+            // Non-host players: Only send input/position (client-side prediction)
+            // Player movement is predicted locally for instant feel
+            networkManager.sendPlayerState({
+                x: player.x,
+                y: player.y,
+                rotation: player.rotation,
+                // Send input keys for host to process shooting/actions
+                keys: {
+                    space: keys[' '] || false,
+                    key1: keys['1'] || false,
+                    key2: keys['2'] || false,
+                    key3: keys['3'] || false,
+                    mouseButton: mouseButtonDown || false
+                },
+                mouseX: mouseActive ? mouseX : null,
+                mouseY: mouseActive ? mouseY : null
+            });
         }
-        
-        networkManager.sendPlayerState({
-            x: player.x,
-            y: player.y,
-            rotation: player.rotation,
-            health: player.health,
-            maxHealth: player.maxHealth,
-            shields: player.shields,
-            maxShields: player.maxShields,
-            score: gameState.score,
-            // Send crew allocations for cargo ship (shared resource)
-            cargoCrewAllocation: {
-                engineering: cargoCrewAllocation.engineering.length,
-                navigation: cargoCrewAllocation.navigation.length
-            },
-            // Send allies and bullets for other players to see
-            allies: alliesWithPlayerId,
-            bullets: bulletsWithPlayerId,
-            // Send tractor beam state so host can process it
-            tractorBeam: tractorBeamState
-        });
     }
     
     // Add smoke particles when damaged (in update, not draw)
@@ -8555,13 +8569,12 @@ function gameLoop(currentTime = performance.now()) {
                 }
             }
             
-            // In multiplayer, host sends game entities (enemies, asteroids, bosses, cargo vessel) to clients
+            // In multiplayer, host sends complete game state to clients (host-authoritative)
             if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
                 // Track if we need to force immediate sync (when entities are destroyed)
                 let forceSync = false;
                 
                 // Check if any entities were destroyed this frame by comparing counts
-                // This is a simple heuristic - if counts decreased, force sync
                 const currentEnemyCount = enemies.length;
                 const currentAsteroidCount = asteroids.length;
                 const currentBossCount = bosses.length;
@@ -8589,6 +8602,45 @@ function gameLoop(currentTime = performance.now()) {
                     bosses: currentBossCount
                 };
                 
+                // Collect all player states (including remote players)
+                const allPlayerStates = {};
+                // Add host player
+                allPlayerStates[networkManager.getPlayerId()] = {
+                    x: player.x,
+                    y: player.y,
+                    rotation: player.rotation,
+                    health: player.health,
+                    shields: player.shields
+                };
+                // Add remote players
+                remotePlayers.forEach((remotePlayer, playerId) => {
+                    allPlayerStates[playerId] = {
+                        x: remotePlayer.x,
+                        y: remotePlayer.y,
+                        rotation: remotePlayer.rotation,
+                        health: remotePlayer.health,
+                        shields: remotePlayer.shields
+                    };
+                });
+                
+                // Send complete game state (host-authoritative approach)
+                networkManager.sendCompleteGameState({
+                    enemies: enemies,
+                    asteroids: asteroids,
+                    bosses: bosses,
+                    bullets: bullets, // All bullets (player, enemy, ally)
+                    allies: allies,
+                    particles: particles,
+                    powerups: powerups,
+                    nebulas: nebulas,
+                    cargoVessel: gameState.gameMode === 'mission' ? cargoVessel : null,
+                    players: allPlayerStates, // All player positions/states
+                    score: gameState.score, // Shared score
+                    level: gameState.level,
+                    enemiesKilled: gameState.enemiesKilled
+                }, forceSync);
+                
+                // Also send game entities for backward compatibility (can remove later)
                 networkManager.sendGameEntities({
                     enemies: enemies,
                     asteroids: asteroids,
@@ -8636,7 +8688,20 @@ function gameLoop(currentTime = performance.now()) {
 
 // Helper function to update game logic in one step
 function updateGameStep() {
-    // Update
+    // For non-host players in multiplayer: Only update local player (client-side prediction)
+    // All other game state comes from host
+    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+        // Only update local player for client-side prediction (instant feel)
+        updatePlayer();
+        
+        // Update UI (skip in headless mode, but allow observer mode)
+        if (!HEADLESS_MODE || OBSERVER_MODE) {
+            updateUI();
+        }
+        return; // Skip all other game logic - host is authoritative
+    }
+    
+    // Host runs full game loop
     updatePlayer();
     updateTractorBeam();
     updateBullets();
@@ -9100,6 +9165,59 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Sync cargo vessel (only in mission mode)
             if (data.entities.cargoVessel && gameState.gameMode === 'mission') {
                 cargoVessel = data.entities.cargoVessel;
+            }
+        }
+    });
+    
+    // Listen for complete game state updates (new host-authoritative approach)
+    // For non-host players, this replaces all game state from host
+    networkManager.on('completeGameStateUpdated', (data) => {
+        if (data.completeState && !networkManager.isHostPlayer()) {
+            // Replace all game state with host's authoritative state
+            if (data.completeState.enemies) enemies = data.completeState.enemies;
+            if (data.completeState.asteroids) asteroids = data.completeState.asteroids;
+            if (data.completeState.bosses) bosses = data.completeState.bosses;
+            if (data.completeState.bullets) bullets = data.completeState.bullets;
+            if (data.completeState.allies) allies = data.completeState.allies;
+            if (data.completeState.particles) particles = data.completeState.particles;
+            if (data.completeState.powerups) powerups = data.completeState.powerups;
+            if (data.completeState.nebulas) nebulas = data.completeState.nebulas;
+            if (data.completeState.cargoVessel && gameState.gameMode === 'mission') {
+                cargoVessel = data.completeState.cargoVessel;
+            }
+            
+            // Sync shared score
+            if (data.completeState.score !== undefined) {
+                gameState.score = data.completeState.score;
+            }
+            if (data.completeState.level !== undefined) {
+                gameState.level = data.completeState.level;
+            }
+            if (data.completeState.enemiesKilled !== undefined) {
+                gameState.enemiesKilled = data.completeState.enemiesKilled;
+            }
+            
+            // Client-side prediction: Smoothly reconcile local player position with host
+            // This prevents jitter while maintaining responsiveness
+            if (data.completeState.players) {
+                const hostPlayerState = data.completeState.players[networkManager.getPlayerId()];
+                if (hostPlayerState) {
+                    // If host position differs significantly, smoothly correct
+                    const dx = hostPlayerState.x - player.x;
+                    const dy = hostPlayerState.y - player.y;
+                    const dist = Math.hypot(dx, dy);
+                    
+                    if (dist > 5) { // Only correct if difference is significant
+                        // Smoothly interpolate to host position (reconciliation)
+                        player.x += dx * 0.3;
+                        player.y += dy * 0.3;
+                        player.rotation += (hostPlayerState.rotation - player.rotation) * 0.3;
+                    }
+                    
+                    // Sync health/shields from host (host is authoritative)
+                    if (hostPlayerState.health !== undefined) player.health = hostPlayerState.health;
+                    if (hostPlayerState.shields !== undefined) player.shields = hostPlayerState.shields;
+                }
             }
         }
     });

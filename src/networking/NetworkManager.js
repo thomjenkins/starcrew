@@ -196,6 +196,14 @@ export class NetworkManager {
                     this.notifyListeners('gameEntitiesUpdated', { entities });
                 }
             });
+            
+            // Clients listen to host's complete game state (new host-authoritative approach)
+            roomRef.child('completeGameState').on('value', (snapshot) => {
+                const completeState = snapshot.val();
+                if (completeState) {
+                    this.notifyListeners('completeGameStateUpdated', { completeState });
+                }
+            });
         }
         
         // Listen for events (playerDied, etc.) - all players listen
@@ -249,6 +257,32 @@ export class NetworkManager {
             });
         } catch (error) {
             console.error('Failed to send game state:', error);
+        }
+    }
+    
+    /**
+     * Send complete game state (entities, particles, etc.) - host only
+     * This is the new host-authoritative approach
+     */
+    async sendCompleteGameState(completeState, force = false) {
+        if (!this.connected || !this.isHost || !this.db || !this.roomId) {
+            return;
+        }
+        
+        const now = Date.now();
+        if (!force && now - this.lastEntitySent < this.entityThrottle) {
+            return; // Throttle updates (unless forced)
+        }
+        this.lastEntitySent = now;
+        
+        try {
+            const stateRef = this.db.ref(`rooms/${this.roomId}/completeGameState`);
+            await stateRef.update({
+                ...completeState,
+                lastUpdate: firebase.database.ServerValue.TIMESTAMP
+            });
+        } catch (error) {
+            console.error('Failed to send complete game state:', error);
         }
     }
     
