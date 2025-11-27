@@ -1870,6 +1870,11 @@ function spawnNebula() {
 
 // Update nebulas
 function updateNebulas() {
+    // For non-host players, positions come from host - don't update
+    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+        return;
+    }
+    
     const now = Date.now();
     
     nebulas = nebulas.filter(nebula => {
@@ -2350,8 +2355,7 @@ function drawNebulas() {
 
 // Update enemies
 function updateEnemies() {
-    // For non-host players, also process enemy shooting based on synced enemy data
-    // This ensures enemy bullets are created and move properly
+    // For non-host players, only process enemy shooting - positions come from host
     if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
         enemies.forEach(enemy => {
             // Decrement shoot cooldown
@@ -2389,6 +2393,8 @@ function updateEnemies() {
                 }
             }
         });
+        // For non-host, don't update enemy positions - they come from host
+        return;
     }
     
     enemies = enemies.filter(enemy => {
@@ -2697,6 +2703,11 @@ function updateEnemies() {
 
 // Update bosses (similar to enemies but stronger)
 function updateBosses() {
+    // For non-host players, positions come from host - don't update
+    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+        return;
+    }
+    
     bosses = bosses.filter(boss => {
         // Similar AI to enemies but always targets player
         const targetX = player.x;
@@ -2883,6 +2894,11 @@ function updateBosses() {
 
 // Update asteroids
 function updateAsteroids() {
+    // For non-host players, positions come from host - don't update
+    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+        return;
+    }
+    
     asteroids = asteroids.filter(asteroid => {
         // Apply tractor beam force if this asteroid is the target
         if (tractorBeam.active && tractorBeam.target === asteroid && tractorBeam.targetType === 'asteroid') {
@@ -8980,14 +8996,11 @@ function updateGameStep() {
         // Update bullets (they come from host, but we need to update positions locally)
         updateBullets();
         
-        // Update entity positions based on synced state from host
-        // Entities have velocities, so we need to update positions locally for smooth rendering
-        // But positions are authoritative from host, so we'll update velocities/positions
-        // based on the synced state
-        updateEnemies(); // Update enemy positions (host sends positions, but we update for smooth rendering)
-        updateAsteroids(); // Update asteroid positions
-        updateBosses(); // Update boss positions
-        updateNebulas(); // Update nebula positions
+        // For non-host players, entity positions come directly from host's complete game state
+        // We do NOT apply velocities locally to prevent drift - host is authoritative
+        // The 16ms sync rate is fast enough for smooth rendering
+        // Note: updateEnemies() is still called for enemy shooting logic (creates bullets)
+        // but we skip position updates for entities - they come from host
         
         // Update enemy bullets visually (positions come from host)
         // Note: updateEnemyBullets() also checks collisions and applies damage
