@@ -232,6 +232,8 @@ let networkManager = null;
 let remotePlayers = new Map(); // Other players: {id: {x, y, rotation, health, shields, ...}}
 let multiplayerMode = false;
 let remoteCrewAllocations = new Map(); // Remote players' crew allocations: {playerId: {engineering: count, navigation: count}}
+let remoteAllies = new Map(); // Remote allies: {playerId: [ally1, ally2, ...]}
+let remoteBullets = new Map(); // Remote bullets: {playerId: [bullet1, bullet2, ...]}
 
 // Firebase configuration
 const firebaseConfig = {
@@ -1184,6 +1186,18 @@ function updatePlayer() {
     
     // Send player state to network if in multiplayer mode
     if (multiplayerMode && networkManager && networkManager.isConnected()) {
+        // Add playerId to each ally for identification
+        const alliesWithPlayerId = allies.map(ally => ({
+            ...ally,
+            playerId: networkManager.getPlayerId()
+        }));
+        
+        // Add playerId to each bullet for identification (include all bullets, including ally bullets)
+        const bulletsWithPlayerId = bullets.map(bullet => ({
+            ...bullet,
+            playerId: networkManager.getPlayerId()
+        }));
+        
         networkManager.sendPlayerState({
             x: player.x,
             y: player.y,
@@ -1197,7 +1211,10 @@ function updatePlayer() {
             cargoCrewAllocation: {
                 engineering: cargoCrewAllocation.engineering.length,
                 navigation: cargoCrewAllocation.navigation.length
-            }
+            },
+            // Send allies and bullets for other players to see
+            allies: alliesWithPlayerId,
+            bullets: bulletsWithPlayerId
         });
     }
     
@@ -1460,6 +1477,11 @@ function updateBullets() {
 
 // Spawn enemies
 function spawnEnemy() {
+    // In multiplayer, only host spawns enemies
+    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+        return;
+    }
+    
     // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
     const creditDifficulty = cumulativeCredits / 100;
     const difficulty = creditDifficulty * 0.05;
@@ -1527,6 +1549,7 @@ function spawnEnemy() {
     } while (attempts < maxAttempts);
     
     enemies.push({
+        id: 'enemy_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9), // Unique ID for multiplayer sync
         x: x,
         y: y,
         width: 30 + Math.random() * 20,
@@ -1551,6 +1574,11 @@ function spawnEnemy() {
 
 // Spawn boss (appears every 1000 points)
 function spawnBoss() {
+    // In multiplayer, only host spawns bosses
+    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+        return;
+    }
+    
     // Difficulty scales with cumulative credits
     const creditDifficulty = cumulativeCredits / 100;
     const difficulty = creditDifficulty * 0.05;
@@ -1593,6 +1621,7 @@ function spawnBoss() {
     const baseHeight = 30 + Math.random() * 20;
     
     bosses.push({
+        id: 'boss_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9), // Unique ID for multiplayer sync
         x: x,
         y: y,
         width: baseWidth * 3, // 3x size (50% bigger than previous 2x)
@@ -1618,11 +1647,17 @@ function spawnBoss() {
 
 // Spawn asteroids
 function spawnAsteroid() {
+    // In multiplayer, only host spawns asteroids
+    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+        return;
+    }
+    
     const size = 20 + Math.random() * 40;
     // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
     const creditDifficulty = cumulativeCredits / 100;
     const difficulty = creditDifficulty * 0.05; // More gradual speed increase
     asteroids.push({
+        id: 'asteroid_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9), // Unique ID for multiplayer sync
         x: Math.random() * getCanvasWidth(),
         y: -size,
         width: size,
@@ -1652,6 +1687,11 @@ function spawnAsteroid() {
 
 // Spawn nebulas
 function spawnNebula() {
+    // In multiplayer, only host spawns nebulas
+    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+        return;
+    }
+    
     const size = 100 + Math.random() * 150; // Slightly larger for more impressive clouds
     
     // Colorful palette: blues, cyans, purples, magentas, reds, and pinks
@@ -5698,6 +5738,7 @@ function drawBullets() {
         trailRenderer.begin();
         circleRenderer.begin();
         
+        // Draw local bullets
         bullets.forEach(bullet => {
             // Draw missile trail
             if (bullet.trail && bullet.trail.length > 1) {
@@ -5731,11 +5772,42 @@ function drawBullets() {
             }
         });
         
+        // Draw remote bullets
+        remoteBullets.forEach((remoteBulletsList, playerId) => {
+            remoteBulletsList.forEach(bullet => {
+                if (bullet.trail && bullet.trail.length > 1) {
+                    trailRenderer.drawTrail(bullet.trail, bullet.color, 2, 0.5);
+                }
+                
+                const color = ColorUtils.parseColor(bullet.color);
+                
+                if (bullet.glow) {
+                    const glowColor = ColorUtils.parseColor(bullet.color, 0.3);
+                    circleRenderer.drawCircle(bullet.x, bullet.y, bullet.size * 2.5, glowColor);
+                    
+                    const midGlowColor = ColorUtils.parseColor(bullet.color, 0.6);
+                    circleRenderer.drawCircle(bullet.x, bullet.y, bullet.size * 1.8, midGlowColor);
+                }
+                
+                circleRenderer.drawCircle(bullet.x, bullet.y, bullet.size, color);
+                
+                if (bullet.type === 'laser') {
+                    const laserColor = ColorUtils.parseColor(bullet.color, 0.8);
+                    const laserPoints = [
+                        { x: bullet.x, y: bullet.y },
+                        { x: bullet.x, y: bullet.y + 30 }
+                    ];
+                    trailRenderer.drawTrail(laserPoints, laserColor, 3, 0.8);
+                }
+            });
+        });
+        
         trailRenderer.end();
         circleRenderer.end();
     } else if (ctx) {
         // Canvas 2D fallback
-    bullets.forEach(bullet => {
+        // Draw local bullets
+        bullets.forEach(bullet => {
         ctx.save();
         
         if (bullet.glow) {
@@ -5818,7 +5890,91 @@ function drawBullets() {
         }
         
         ctx.restore();
-    });
+        });
+        
+        // Draw remote bullets
+        remoteBullets.forEach((remoteBulletsList, playerId) => {
+            remoteBulletsList.forEach(bullet => {
+                ctx.save();
+                
+                if (bullet.glow) {
+                    ctx.shadowBlur = bullet.size * 3;
+                    ctx.shadowColor = bullet.color;
+                }
+                
+                if (bullet.trail && bullet.trail.length > 1) {
+                    ctx.strokeStyle = bullet.color;
+                    ctx.lineWidth = 2;
+                    ctx.globalAlpha = 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(bullet.trail[0].x, bullet.trail[0].y);
+                    for (let i = 1; i < bullet.trail.length; i++) {
+                        ctx.lineTo(bullet.trail[i].x, bullet.trail[i].y);
+                    }
+                    ctx.stroke();
+                    ctx.globalAlpha = 1;
+                }
+                
+                if (bullet.glow) {
+                    try {
+                        const gradient = ctx.createRadialGradient(bullet.x, bullet.y, 0, bullet.x, bullet.y, bullet.size * 2);
+                        gradient.addColorStop(0, bullet.color);
+                        
+                        let colorWithAlpha = bullet.color;
+                        if (bullet.color.startsWith('#')) {
+                            colorWithAlpha = hexToRgba(bullet.color, 0.5);
+                        } else if (bullet.color.startsWith('rgba')) {
+                            colorWithAlpha = bullet.color.replace(/[\d.]+\)$/, '0.5)');
+                        } else if (bullet.color.startsWith('rgb')) {
+                            colorWithAlpha = bullet.color.replace('rgb', 'rgba').replace(')', ', 0.5)');
+                        } else if (bullet.color.startsWith('hsl')) {
+                            colorWithAlpha = bullet.color.replace('hsl', 'hsla').replace(')', ', 0.5)');
+                        }
+                        gradient.addColorStop(0.5, colorWithAlpha);
+                        
+                        let transparentColor = bullet.color;
+                        if (bullet.color.startsWith('#')) {
+                            transparentColor = hexToRgba(bullet.color, 0);
+                        } else if (bullet.color.startsWith('rgba')) {
+                            transparentColor = bullet.color.replace(/[\d.]+\)$/, '0)');
+                        } else if (bullet.color.startsWith('rgb')) {
+                            transparentColor = bullet.color.replace('rgb', 'rgba').replace(')', ', 0)');
+                        } else if (bullet.color.startsWith('hsl')) {
+                            transparentColor = bullet.color.replace('hsl', 'hsla').replace(')', ', 0)');
+                        }
+                        gradient.addColorStop(1, transparentColor);
+                        
+                        ctx.fillStyle = gradient;
+                        ctx.beginPath();
+                        ctx.arc(bullet.x, bullet.y, bullet.size * 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    } catch (e) {
+                        ctx.fillStyle = bullet.color;
+                        ctx.beginPath();
+                        ctx.arc(bullet.x, bullet.y, bullet.size, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+                
+                ctx.fillStyle = bullet.color;
+                ctx.beginPath();
+                ctx.arc(bullet.x, bullet.y, bullet.size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                if (bullet.type === 'laser') {
+                    ctx.strokeStyle = bullet.color;
+                    ctx.lineWidth = 3;
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = bullet.color;
+                    ctx.beginPath();
+                    ctx.moveTo(bullet.x, bullet.y);
+                    ctx.lineTo(bullet.x, bullet.y + 30);
+                    ctx.stroke();
+                }
+                
+                ctx.restore();
+            });
+        });
     }
 }
 
@@ -6436,6 +6592,7 @@ function drawAllies() {
         // WebGL rendering
         spriteRenderer.begin();
         
+        // Draw local allies
         allies.forEach(ally => {
             // Draw ally ship using sprite - only if texture is loaded
             const allyTexture = textures.ally || null;
@@ -6453,12 +6610,32 @@ function drawAllies() {
             );
         });
         
+        // Draw remote allies
+        remoteAllies.forEach((remoteAlliesList, playerId) => {
+            remoteAlliesList.forEach(ally => {
+                const allyTexture = textures.ally || null;
+                if (!allyTexture) return;
+                
+                const allyColor = new Float32Array([1, 1, 1, 1]);
+                
+                spriteRenderer.drawSprite(
+                    allyTexture,
+                    ally.x, ally.y,
+                    ally.width, ally.height,
+                    (ally.rotation || 0) + Math.PI,
+                    allyColor,
+                    0.5, 0.5
+                );
+            });
+        });
+        
         spriteRenderer.end();
     } else if (ctx) {
         // Canvas 2D fallback
-    allies.forEach(ally => {
-        ctx.save();
-        ctx.translate(ally.x, ally.y);
+        // Draw local allies
+        allies.forEach(ally => {
+            ctx.save();
+            ctx.translate(ally.x, ally.y);
             ctx.rotate(ally.rotation);
             
             // Draw ally ship image if loaded
@@ -6472,15 +6649,15 @@ function drawAllies() {
                 );
             } else {
                 // Fallback drawn shape
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = '#00ff00';
-        
-        const allyGradient = ctx.createLinearGradient(-ally.width / 2, -ally.height / 2, 0, ally.height / 2);
-        allyGradient.addColorStop(0, '#00aa00');
-        allyGradient.addColorStop(0.5, '#00ff00');
-        allyGradient.addColorStop(1, '#006600');
-        
-        ctx.fillStyle = allyGradient;
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#00ff00';
+                
+                const allyGradient = ctx.createLinearGradient(-ally.width / 2, -ally.height / 2, 0, ally.height / 2);
+                allyGradient.addColorStop(0, '#00aa00');
+                allyGradient.addColorStop(0.5, '#00ff00');
+                allyGradient.addColorStop(1, '#006600');
+                
+                ctx.fillStyle = allyGradient;
         ctx.beginPath();
         ctx.moveTo(0, -ally.height / 2);
         ctx.lineTo(-ally.width / 2, ally.height / 2);
@@ -6611,6 +6788,11 @@ function initMissionMode() {
 
 function updateCargoVessel() {
     if (!cargoVessel || gameState.gameMode !== 'mission') return;
+    
+    // In multiplayer, only host updates cargo vessel
+    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+        return;
+    }
     
     // Apply navigation crew effect - reduces journey time proportionally
     // More crew = faster journey (reduced journey time, not increased speed)
@@ -8138,6 +8320,16 @@ function gameLoop(currentTime = performance.now()) {
                     cumulativeCredits += 10; // Track cumulative credits
                 }
             }
+            
+            // In multiplayer, host sends game entities (enemies, asteroids, bosses, cargo vessel) to clients
+            if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
+                networkManager.sendGameEntities({
+                    enemies: enemies,
+                    asteroids: asteroids,
+                    bosses: bosses,
+                    cargoVessel: gameState.gameMode === 'mission' ? cargoVessel : null
+                });
+            }
         } else {
             // Still update UI when paused (for visual feedback)
             if (!HEADLESS_MODE || OBSERVER_MODE) {
@@ -8485,6 +8677,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 remoteCrewAllocations.set(data.player.id, data.player.cargoCrewAllocation);
             }
             
+            // Store remote allies if present
+            if (data.player.allies && Array.isArray(data.player.allies)) {
+                remoteAllies.set(data.player.id, data.player.allies);
+            }
+            
+            // Store remote bullets if present
+            if (data.player.bullets && Array.isArray(data.player.bullets)) {
+                remoteBullets.set(data.player.id, data.player.bullets);
+            }
+            
             // Update UI if command module is open
             if (gameState.commandModuleOpen) {
                 updateCommandModuleUI();
@@ -8495,11 +8697,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     networkManager.on('playerLeft', (data) => {
         remotePlayers.delete(data.playerId);
         remoteCrewAllocations.delete(data.playerId);
+        remoteAllies.delete(data.playerId);
+        remoteBullets.delete(data.playerId);
         updatePlayerCountUI();
         
         // Update UI if command module is open
         if (gameState.commandModuleOpen) {
             updateCommandModuleUI();
+        }
+    });
+    
+    // Listen for game entity updates (enemies, asteroids, bosses, cargo vessel) from host
+    networkManager.on('gameEntitiesUpdated', (data) => {
+        if (data.entities) {
+            // Replace local arrays with host's synchronized entities
+            if (data.entities.enemies) {
+                enemies = data.entities.enemies;
+            }
+            if (data.entities.asteroids) {
+                asteroids = data.entities.asteroids;
+            }
+            if (data.entities.bosses) {
+                bosses = data.entities.bosses;
+            }
+            // Sync cargo vessel (only in mission mode)
+            if (data.entities.cargoVessel && gameState.gameMode === 'mission') {
+                cargoVessel = data.entities.cargoVessel;
+            }
         }
     });
     

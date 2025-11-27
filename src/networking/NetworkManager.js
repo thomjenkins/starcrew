@@ -10,6 +10,8 @@ export class NetworkManager {
         this.listeners = [];
         this.lastInputSent = 0;
         this.inputThrottle = 50; // Send inputs every 50ms (20 updates/sec)
+        this.lastEntitySent = 0;
+        this.entityThrottle = 100; // Send entities every 100ms (10 updates/sec)
     }
     
     /**
@@ -186,6 +188,14 @@ export class NetworkManager {
                     this.notifyListeners('gameStateUpdated', { gameState });
                 }
             });
+            
+            // Clients listen to host's game entities (enemies, asteroids)
+            roomRef.child('gameEntities').on('value', (snapshot) => {
+                const entities = snapshot.val();
+                if (entities) {
+                    this.notifyListeners('gameEntitiesUpdated', { entities });
+                }
+            });
         }
     }
     
@@ -230,6 +240,34 @@ export class NetworkManager {
             });
         } catch (error) {
             console.error('Failed to send game state:', error);
+        }
+    }
+    
+    /**
+     * Send game entities (enemies, asteroids) - host only
+     */
+    async sendGameEntities(entities) {
+        if (!this.connected || !this.isHost || !this.db || !this.roomId) {
+            return;
+        }
+        
+        const now = Date.now();
+        if (now - this.lastEntitySent < this.entityThrottle) {
+            return; // Throttle updates
+        }
+        this.lastEntitySent = now;
+        
+        try {
+            const entitiesRef = this.db.ref(`rooms/${this.roomId}/gameEntities`);
+            await entitiesRef.update({
+                enemies: entities.enemies || [],
+                asteroids: entities.asteroids || [],
+                bosses: entities.bosses || [],
+                cargoVessel: entities.cargoVessel || null,
+                lastUpdate: firebase.database.ServerValue.TIMESTAMP
+            });
+        } catch (error) {
+            console.error('Failed to send game entities:', error);
         }
     }
     
@@ -336,6 +374,13 @@ export class NetworkManager {
      */
     getPlayerId() {
         return this.playerId;
+    }
+    
+    /**
+     * Check if this player is the host
+     */
+    isHostPlayer() {
+        return this.isHost;
     }
 }
 
