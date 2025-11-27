@@ -9010,6 +9010,18 @@ function updateGameStep() {
     // Increment game tick
     gameTick++;
     
+    // In multiplayer, sync player positions for rendering (lockstep handles entities)
+    if (multiplayerMode && networkManager && networkManager.isConnected()) {
+        // Send our position for other players to render
+        networkManager.sendPlayerState({
+            x: player.x,
+            y: player.y,
+            rotation: player.rotation,
+            health: player.health,
+            shields: player.shields
+        });
+    }
+    
     // Mission mode updates
     if (gameState.gameMode === 'mission') {
         updateCargoVessel();
@@ -9119,6 +9131,10 @@ function restartGame() {
         commandModuleOpen: false,
         journeyCount: 0
     };
+    
+    // Reset game tick and input queue for lockstep
+    gameTick = 0;
+    inputQueue = [];
     
     // Reset high score flag and clear fireworks
     newHighScore = false;
