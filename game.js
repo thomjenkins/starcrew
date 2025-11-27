@@ -1371,6 +1371,7 @@ function shoot(weaponType) {
 // Update bullets
 function updateBullets() {
     bullets = bullets.filter(bullet => {
+        // Update position for all bullets (including enemy bullets)
         bullet.x += bullet.vx;
         bullet.y += bullet.vy;
 
@@ -2330,6 +2331,47 @@ function drawNebulas() {
 
 // Update enemies
 function updateEnemies() {
+    // For non-host players, also process enemy shooting based on synced enemy data
+    // This ensures enemy bullets are created and move properly
+    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+        enemies.forEach(enemy => {
+            // Decrement shoot cooldown
+            if (enemy.shootCooldown !== undefined) {
+                enemy.shootCooldown--;
+            } else {
+                enemy.shootCooldown = 60 + Math.random() * 60;
+            }
+            
+            // Check if enemy should shoot
+            if (enemy.shootCooldown <= 0) {
+                enemy.shootCooldown = 60 + Math.random() * 60;
+                
+                // Calculate target (player)
+                const dx = player.x - enemy.x;
+                const dy = player.y - enemy.y;
+                const dist = Math.hypot(dx, dy);
+                
+                if (dist > 0) {
+                    // Shoot at target from the front of the enemy
+                    const frontX = enemy.x + Math.sin(enemy.rotation) * ((enemy.height || 20) / 2);
+                    const frontY = enemy.y - Math.cos(enemy.rotation) * ((enemy.height || 20) / 2);
+                    
+                    bullets.push({
+                        x: frontX,
+                        y: frontY,
+                        vx: (dx / dist) * 3,
+                        vy: (dy / dist) * 3,
+                        damage: enemy.damage || 10,
+                        color: '#ff0000',
+                        size: 4,
+                        type: 'enemy',
+                        glow: true
+                    });
+                }
+            }
+        });
+    }
+    
     enemies = enemies.filter(enemy => {
         // Decrease target switch cooldown
         if (enemy.targetSwitchCooldown > 0) {
