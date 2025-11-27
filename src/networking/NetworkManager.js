@@ -9,9 +9,9 @@ export class NetworkManager {
         this.connected = false;
         this.listeners = [];
         this.lastInputSent = 0;
-        this.inputThrottle = 50; // Send inputs every 50ms (20 updates/sec)
+        this.inputThrottle = 16; // Send inputs every 16ms (~60 updates/sec) for smoother sync
         this.lastEntitySent = 0;
-        this.entityThrottle = 100; // Send entities every 100ms (10 updates/sec)
+        this.entityThrottle = 33; // Send entities every 33ms (~30 updates/sec) for smoother sync
     }
     
     /**
