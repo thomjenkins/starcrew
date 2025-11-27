@@ -7369,7 +7369,10 @@ function updateCrewAllocation() {
 }
 
 function openCommandModule() {
-    gameState.paused = true;
+    // Don't pause the game in multiplayer - it should continue running for both players
+    if (!multiplayerMode || !networkManager || !networkManager.isConnected()) {
+        gameState.paused = true;
+    }
     gameState.commandModuleOpen = true;
     document.getElementById('commandModule').classList.remove('hidden');
     updateCommandModuleUI();
@@ -8592,7 +8595,20 @@ function updateGameStep() {
 }
 
 function gameOver() {
+    // Prevent duplicate game over calls
+    if (!gameState.running) {
+        return;
+    }
+    
     gameState.running = false;
+    
+    // In multiplayer, send event to notify all players
+    if (multiplayerMode && networkManager && networkManager.isConnected()) {
+        networkManager.sendEvent('playerDied', {
+            playerId: networkManager.getPlayerId(),
+            score: gameState.score
+        });
+    }
     
     // Check for new high score
     if (gameState.score > highScore) {
@@ -8936,6 +8952,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Update UI if command module is open
         if (gameState.commandModuleOpen) {
             updateCommandModuleUI();
+        }
+    });
+    
+    // Listen for player death events - game over for one player means game over for all
+    networkManager.on('playerDied', (data) => {
+        // Trigger game over for all players when any player dies
+        if (gameState.running) {
+            gameOver();
         }
     });
     

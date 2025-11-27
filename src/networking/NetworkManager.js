@@ -197,6 +197,15 @@ export class NetworkManager {
                 }
             });
         }
+        
+        // Listen for events (playerDied, etc.) - all players listen
+        roomRef.child('events').on('child_added', (snapshot) => {
+            const event = snapshot.val();
+            if (event && event.type) {
+                // Process events from all players (callbacks will handle duplicate prevention)
+                this.notifyListeners(event.type, { ...event.data, playerId: event.playerId } || {});
+            }
+        });
     }
     
     /**
