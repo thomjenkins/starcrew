@@ -357,7 +357,7 @@ const weapons = {
     primary: {
         damage: 10,
         cooldown: 0,
-        maxCooldown: 50,
+        maxCooldown: 100,
         ammo: Infinity,
         color: '#ffff00'
     },
