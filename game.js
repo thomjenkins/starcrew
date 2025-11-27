@@ -1100,7 +1100,8 @@ function updatePlayer() {
     let wasMoving = false;
     
     // Autopilot control (if enabled) - must run FIRST to set keys
-    if (autopilotEnabled && gameState.running && !gameState.paused) {
+    // Allow autopilot to run even when paused (for upgrade selection)
+    if (autopilotEnabled && gameState.running) {
         autopilotStep();
     }
     
@@ -1251,7 +1252,8 @@ function updatePlayer() {
 
     // Shooting (deterministic lockstep - both players process their own shooting)
     // Mouse button or spacebar for primary weapon
-    if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0) {
+    // Additional cooldown check to prevent spam (defensive)
+    if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0 && weapons.primary.ammo > 0) {
         shoot('primary');
     }
     if (keys['1'] && weapons.missile.cooldown === 0 && weapons.missile.ammo > 0) {
@@ -1435,7 +1437,10 @@ function shoot(weaponType) {
 
 // Update bullets
 function updateBullets() {
-    const isAuthoritativeForDamage = !multiplayerMode || !networkManager || networkManager.isHostPlayer();
+    // In deterministic lockstep (gameSeed set), both players apply damage (it's deterministic)
+    // In host-authoritative mode (no seed), only host applies damage
+    const isLockstep = multiplayerMode && gameSeed !== null;
+    const isAuthoritativeForDamage = !multiplayerMode || !networkManager || networkManager.isHostPlayer() || isLockstep;
 
     bullets = bullets.filter(bullet => {
         // Update position for all bullets (including enemy bullets)
@@ -2437,12 +2442,12 @@ function updateEnemies() {
         // Choose target: only switch if cooldown is 0
         if (enemy.targetSwitchCooldown === 0) {
             // Choose target: cargo vessel (40% chance in mission mode), ally (30% chance if nearby), or player
-            if (gameState.gameMode === 'mission' && nearestCargo && Math.random() < 0.4) {
+            if (gameState.gameMode === 'mission' && nearestCargo && getRandom() < 0.4) {
                 targetX = nearestCargo.x;
                 targetY = nearestCargo.y;
                 newTargetType = 'cargo';
                 enemy.targetSwitchCooldown = 120; // 2 seconds at 60fps
-            } else if (nearestAlly && nearestAllyDist < 200 && Math.random() < 0.3) {
+            } else if (nearestAlly && nearestAllyDist < 200 && getRandom() < 0.3) {
                 // 30% chance to target nearby ally
                 targetX = nearestAlly.x;
                 targetY = nearestAlly.y;
@@ -2584,7 +2589,7 @@ function updateEnemies() {
 
         // Enemy shooting (can shoot from anywhere on screen)
         if (enemy.shootCooldown <= 0 && dist > 0) {
-            enemy.shootCooldown = 60 + Math.random() * 60;
+            enemy.shootCooldown = 60 + getRandom() * 60;
             sounds.enemyShot();
             
             // Shoot at target from the front of the enemy (pointy end)
@@ -9050,8 +9055,9 @@ function updateGameStep() {
     updateEnemyBullets();
     updateFireworks();
 
-    // Host applies damage/collision logic for remote-controlled entities
-    if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
+    // In deterministic lockstep, both players process damage locally (it's deterministic)
+    // Only use host-authoritative processing in non-lockstep mode
+    if (multiplayerMode && networkManager && networkManager.isHostPlayer() && gameSeed === null) {
         processRemoteBullets();
         processRemotePlayerCollisions();
     }
