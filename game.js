@@ -1235,7 +1235,23 @@ function updatePlayer() {
         }
     }
 
-    // Weapon cooldowns (with crew effect)
+    // Shooting (deterministic lockstep - both players process their own shooting)
+    // Mouse button or spacebar for primary weapon
+    // Check cooldown BEFORE decrementing to prevent spam
+    if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0 && weapons.primary.ammo > 0) {
+        shoot('primary');
+    }
+    if (keys['1'] && weapons.missile.cooldown === 0 && weapons.missile.ammo > 0) {
+        shoot('missile');
+    }
+    if (keys['2'] && weapons.laser.cooldown === 0 && weapons.laser.ammo > 0) {
+        shoot('laser');
+    }
+    if (keys['3'] && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
+        shoot('cluster');
+    }
+
+    // Weapon cooldowns (with crew effect) - decrement AFTER shooting check
     const weaponsCrewCount = crewAllocation.weapons.length;
     const cooldownMultiplier = Math.max(0.1, 1 - (weaponsCrewCount * crewEffects.weapons.cooldownReduction));
     
@@ -1249,22 +1265,6 @@ function updatePlayer() {
             weapons[weapon].cooldown = Math.max(0, weapons[weapon].cooldown - decreaseAmount);
         }
     });
-
-    // Shooting (deterministic lockstep - both players process their own shooting)
-    // Mouse button or spacebar for primary weapon
-    // Additional cooldown check to prevent spam (defensive)
-    if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0 && weapons.primary.ammo > 0) {
-        shoot('primary');
-    }
-    if (keys['1'] && weapons.missile.cooldown === 0 && weapons.missile.ammo > 0) {
-        shoot('missile');
-    }
-    if (keys['2'] && weapons.laser.cooldown === 0 && weapons.laser.ammo > 0) {
-        shoot('laser');
-    }
-    if (keys['3'] && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
-        shoot('cluster');
-    }
     
     // Send player input for deterministic lockstep
     if (multiplayerMode && networkManager && networkManager.isConnected()) {
