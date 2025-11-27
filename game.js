@@ -231,6 +231,7 @@ function initCrewImage() {
 let networkManager = null;
 let remotePlayers = new Map(); // Other players: {id: {x, y, rotation, health, shields, ...}}
 let multiplayerMode = false;
+let remoteCrewAllocations = new Map(); // Remote players' crew allocations: {playerId: {engineering: count, navigation: count}}
 
 // Firebase configuration
 const firebaseConfig = {
@@ -1191,7 +1192,12 @@ function updatePlayer() {
             maxHealth: player.maxHealth,
             shields: player.shields,
             maxShields: player.maxShields,
-            score: gameState.score
+            score: gameState.score,
+            // Send crew allocations for cargo ship (shared resource)
+            cargoCrewAllocation: {
+                engineering: cargoCrewAllocation.engineering.length,
+                navigation: cargoCrewAllocation.navigation.length
+            }
         });
     }
     
@@ -7019,6 +7025,28 @@ function updateCargoCrewAllocation() {
     });
 }
 
+// Get combined crew allocation counts (local + all remote players)
+function getCombinedCargoCrewAllocation() {
+    let combined = {
+        engineering: cargoCrewAllocation.engineering.length,
+        navigation: cargoCrewAllocation.navigation.length
+    };
+    
+    // Add remote players' crew allocations
+    if (multiplayerMode && networkManager) {
+        remoteCrewAllocations.forEach((allocation, playerId) => {
+            if (allocation.engineering) {
+                combined.engineering += allocation.engineering;
+            }
+            if (allocation.navigation) {
+                combined.navigation += allocation.navigation;
+            }
+        });
+    }
+    
+    return combined;
+}
+
 function updateCommandModuleUI() {
     document.getElementById('totalCrew').textContent = totalCrew;
     // Update currency in both tabs
@@ -7182,8 +7210,11 @@ function updateCommandModuleUI() {
     
     // Update cargo ship crew displays (only in mission mode)
     if (gameState.gameMode === 'mission') {
+        // Get combined crew counts (local + remote players)
+        const combinedCrew = getCombinedCargoCrewAllocation();
+        
         // Update cargo engineering station
-        const cargoEngineeringCount = cargoCrewAllocation.engineering.length;
+        const cargoEngineeringCount = combinedCrew.engineering;
         const cargoEngineeringEl = document.getElementById('cargoEngineeringCrew');
         if (cargoEngineeringEl) cargoEngineeringEl.textContent = cargoEngineeringCount;
         const cargoEngineeringEffectEl = document.getElementById('cargoEngineeringEffect');
@@ -7225,7 +7256,7 @@ function updateCommandModuleUI() {
         }
         
         // Update cargo navigation station
-        const cargoNavigationCount = cargoCrewAllocation.navigation.length;
+        const cargoNavigationCount = combinedCrew.navigation;
         const cargoNavigationEl = document.getElementById('cargoNavigationCrew');
         if (cargoNavigationEl) cargoNavigationEl.textContent = cargoNavigationCount;
         const cargoNavigationEffectEl = document.getElementById('cargoNavigationEffect');
@@ -7672,6 +7703,25 @@ function assignCrewToStation(crewId, station, ship) {
             crew.station = station;
             updateCargoCrewAllocation();
             updateCommandModuleUI();
+            
+            // Trigger immediate network update for crew allocation change
+            if (multiplayerMode && networkManager && networkManager.isConnected()) {
+                // Force immediate update by sending player state
+                networkManager.sendPlayerState({
+                    x: player.x,
+                    y: player.y,
+                    rotation: player.rotation,
+                    health: player.health,
+                    maxHealth: player.maxHealth,
+                    shields: player.shields,
+                    maxShields: player.maxShields,
+                    score: gameState.score,
+                    cargoCrewAllocation: {
+                        engineering: cargoCrewAllocation.engineering.length,
+                        navigation: cargoCrewAllocation.navigation.length
+                    }
+                });
+            }
         }
     }
     isDraggingCrew = null;
@@ -8429,12 +8479,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Remote player state updated
         if (data.player && data.player.id !== networkManager.getPlayerId()) {
             remotePlayers.set(data.player.id, data.player);
+            
+            // Store crew allocation if present
+            if (data.player.cargoCrewAllocation) {
+                remoteCrewAllocations.set(data.player.id, data.player.cargoCrewAllocation);
+            }
+            
+            // Update UI if command module is open
+            if (gameState.commandModuleOpen) {
+                updateCommandModuleUI();
+            }
         }
     });
     
     networkManager.on('playerLeft', (data) => {
         remotePlayers.delete(data.playerId);
+        remoteCrewAllocations.delete(data.playerId);
         updatePlayerCountUI();
+        
+        // Update UI if command module is open
+        if (gameState.commandModuleOpen) {
+            updateCommandModuleUI();
+        }
     });
     
     // Preload RL agent in background so it's ready when autopilot is toggled
