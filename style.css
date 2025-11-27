@@ -83,6 +83,80 @@ body {
     border-color: rgba(0, 150, 255, 0.8);
 }
 
+.autopilot-toggle {
+    background: rgba(0, 150, 255, 0.3);
+    border: 1px solid rgba(0, 150, 255, 0.5);
+    color: #66aaff;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.3s;
+    margin: 0 5px;
+    min-width: 100px;
+}
+
+.autopilot-toggle:hover {
+    background: rgba(0, 150, 255, 0.5);
+    border-color: rgba(0, 150, 255, 0.8);
+}
+
+.autopilot-toggle.active {
+    background: rgba(0, 255, 0, 0.3);
+    border-color: rgba(0, 255, 0, 0.8);
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+}
+
+.autopilot-toggle.active #autopilotStatus {
+    color: #00ff00;
+}
+
+.training-toggle {
+    background: rgba(255, 165, 0, 0.3);
+    border: 1px solid rgba(255, 165, 0, 0.5);
+    color: #ffaa44;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.3s;
+    margin: 0 5px;
+    min-width: 100px;
+}
+
+.training-toggle:hover {
+    background: rgba(255, 165, 0, 0.5);
+    border-color: rgba(255, 165, 0, 0.8);
+}
+
+.training-toggle.active {
+    background: rgba(255, 200, 0, 0.4);
+    border-color: rgba(255, 200, 0, 0.9);
+    box-shadow: 0 0 10px rgba(255, 200, 0, 0.5);
+}
+
+.training-toggle.active #trainingStatus {
+    color: #ffcc00;
+}
+
+.training-stats {
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 165, 0, 0.3);
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+}
+
+.training-stats h3 {
+    color: #ffaa44;
+    margin: 0 0 10px 0;
+    font-size: 14px;
+}
+
+.training-stats.hidden {
+    display: none;
+}
+
 .hud-toggle {
     background: rgba(0, 150, 255, 0.3);
     border: 1px solid rgba(0, 150, 255, 0.5);
@@ -323,7 +397,7 @@ body {
     border-color: #888;
 }
 
-#modeSelect {
+#missionBriefing {
     position: absolute;
     top: 50%;
     left: 50%;
@@ -337,21 +411,48 @@ body {
     box-shadow: 0 0 30px rgba(0, 102, 255, 0.5);
 }
 
-#modeSelect.hidden {
+#missionBriefing.hidden {
     display: none;
 }
 
-#modeSelect h2 {
+#missionBriefing h2 {
     margin-bottom: 20px;
     font-size: 28px;
     color: #66aaff;
 }
 
-#modeSelect h3 {
+#missionBriefing h3 {
     font-size: 20px;
     color: #66aaff;
     margin-bottom: 15px;
     margin-top: 0;
+}
+
+.briefing-tagline {
+    color: #ccc;
+    font-size: 15px;
+    margin-bottom: 20px;
+}
+
+.briefing-section {
+    margin: 20px auto;
+    padding: 20px;
+    background: rgba(0, 30, 80, 0.4);
+    border: 1px solid rgba(0, 120, 255, 0.3);
+    border-radius: 10px;
+    text-align: left;
+    max-width: 520px;
+}
+
+.briefing-section ul {
+    margin: 10px 0 0 18px;
+    color: #ccc;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.briefing-section li {
+    margin: 4px 0;
 }
 
 .instructions {
@@ -638,24 +739,63 @@ body {
     border-radius: 5px;
 }
 
+
+.crew-slots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    min-height: 40px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+    border: 1px dashed #00aa00;
+}
+
+/* Legacy station styles for cargo ship */
+#stations {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.station {
+    background: rgba(0, 50, 0, 0.3);
+    padding: 15px;
+    border-radius: 8px;
+    border: 2px solid #00aa00;
+}
+
+.station h3 {
+    color: #00ff00;
+    margin-bottom: 10px;
+    font-size: 20px;
+}
+
+.crew-assigned {
+    margin: 10px 0;
+}
+
 .crew-member {
-    width: 25px;
-    height: 25px;
-    background: #00ff00;
-    border-radius: 50%;
+    width: 37.5px;
+    height: 37.5px;
+    background: transparent;
+    border-radius: 0;
     cursor: move;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 12px;
-    border: 2px solid #00ff88;
+    border: none;
+    overflow: hidden;
+    position: relative;
     transition: all 0.2s;
     user-select: none;
 }
 
 .crew-member:hover {
     transform: scale(1.2);
-    box-shadow: 0 0 10px rgba(0, 255, 0, 0.8);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
 }
 
 .crew-member.dragging {
@@ -934,7 +1074,7 @@ body {
     
     /* Adjust modal sizes for mobile */
     #upgradeMenu,
-    #modeSelect,
+    #missionBriefing,
     #gameOver,
     #missionComplete {
         width: 90vw;
@@ -986,8 +1126,8 @@ body {
     }
     
     .crew-member {
-        width: 30px;
-        height: 30px;
+        width: 45px;
+        height: 45px;
         font-size: 14px;
     }
 }

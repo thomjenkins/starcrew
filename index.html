@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asteroid Droid</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
 </head>
 <body>
     <div id="gameContainer">
@@ -20,9 +21,23 @@
                         <button id="musicToggle" class="audio-toggle" title="Toggle Music">🎵</button>
                         <button id="soundToggle" class="audio-toggle" title="Toggle Sound Effects">🔊</button>
                     </div>
+                    <button id="autopilotToggle" class="autopilot-toggle" title="Toggle Autopilot (U)">
+                        <span id="autopilotStatus">Autopilot: OFF</span>
+                    </button>
                     <button id="hudToggle" class="hud-toggle" title="Toggle HUD">▼</button>
                 </div>
                 <div id="hudContent" class="hud-content collapsed">
+                    <div id="trainingStats" class="training-stats hidden">
+                        <h3>Training Progress</h3>
+                        <div class="stat">
+                            <span>Episode: <span id="trainingEpisode">0</span></span>
+                            <span>Best Score: <span id="trainingBestScore">0</span></span>
+                        </div>
+                        <div class="stat">
+                            <span>Avg Reward: <span id="trainingAvgReward">0</span></span>
+                            <span>Total Reward: <span id="trainingTotalReward">0</span></span>
+                        </div>
+                    </div>
                     <div class="stat">
                         <span>Health: </span>
                         <div class="bar health-bar">
@@ -109,37 +124,42 @@
             <div id="upgradeOptions"></div>
             <button id="closeUpgrade">Close</button>
         </div>
-        <div id="modeSelect" class="hidden">
-            <h2>Asteroid Droid</h2>
+        <div id="missionBriefing" class="hidden">
+            <h2>Asteroid Droid: Mission Briefing</h2>
+            <p class="briefing-tagline">Escort the cargo convoy across hostile space while your onboard AI learns from your instincts.</p>
+            <div class="briefing-section">
+                <h3>Objective</h3>
+                <p>Keep the cargo ship alive, mine asteroids for upgrades, and eliminate enemy squadrons to earn credits. Complete enough deliveries to push deeper into the sector.</p>
+            </div>
+            <div class="briefing-section">
+                <h3>Rules of Engagement</h3>
+                <ul>
+                    <li>Protect both your hull and the cargo vessel—losing either ends the run.</li>
+                    <li>Asteroids drop tokens; pick them up quickly to choose an upgrade.</li>
+                    <li>Assign crew in the Command Module (P key / Command button) to boost systems.</li>
+                    <li>Tractor asteroids or enemies, then destroy them for extra rewards.</li>
+                </ul>
+            </div>
             <div id="instructions" class="instructions">
                 <h3>Controls</h3>
                 <div class="instructions-content">
                     <div class="desktop-instructions">
-                        <p><strong>Movement:</strong> WASD or Arrow Keys</p>
-                        <p><strong>Move & Shoot:</strong> Mouse/Trackpad (click to shoot)</p>
-                        <p><strong>Weapons:</strong> Space (Primary) | 1 (Missile) | 2 (Laser) | 3 (Cluster)</p>
-                        <p><strong>Tractor Beam:</strong> T key</p>
-                        <p><strong>Command Module:</strong> P key</p>
+                        <p><strong>Movement:</strong> WASD / Arrow Keys or mouse steering</p>
+                        <p><strong>Primary Fire:</strong> Space or left-click (hold for continuous fire)</p>
+                        <p><strong>Missile / Laser:</strong> Keys 1 and 2</p>
+                        <p><strong>Tractor Beam:</strong> T key (toggle on mobile)</p>
+                        <p><strong>Autopilot:</strong> U key to let the AI fly</p>
+                        <p><strong>Command Module:</strong> P key to allocate crew & buy gear</p>
                     </div>
                     <div class="mobile-instructions">
-                        <p><strong>Movement:</strong> Touch and drag on screen</p>
-                        <p><strong>Shoot:</strong> Touch and hold (Primary weapon)</p>
-                        <p><strong>Weapons:</strong> Use buttons on right side</p>
-                        <p><strong>Command Module:</strong> Tap "Command" button</p>
+                        <p><strong>Movement:</strong> Touch and drag to steer</p>
+                        <p><strong>Primary Fire:</strong> Hold anywhere on screen</p>
+                        <p><strong>Missile / Laser:</strong> Use weapon buttons</p>
+                        <p><strong>Tractor Beam & Command:</strong> Use dedicated buttons</p>
                     </div>
                 </div>
-                <div class="gameplay-tips">
-                    <p><strong>Tips:</strong></p>
-                    <ul>
-                        <li>Mine asteroids to earn upgrades</li>
-                        <li>Press P (or Command button) to manage crew and stations</li>
-                        <li>Assign crew to stations for bonuses</li>
-                        <li>Upgrade your ship between levels</li>
-                    </ul>
-                </div>
             </div>
-            <button id="normalModeBtn" class="mode-btn">Normal Mode</button>
-            <button id="missionModeBtn" class="mode-btn">Mission Mode</button>
+            <button id="startMissionBtn" class="mode-btn">Get Started</button>
         </div>
         <div id="missionComplete" class="hidden">
             <h2>Mission Complete!</h2>
@@ -245,14 +265,19 @@
                         <h3>Cargo Ship</h3>
                         <p>Purchase an additional cargo vessel</p>
                         <p>Cargo Ships: <span id="cargoShipCount">0</span></p>
-                        <button id="buyCargoShipBtn" class="recruit-btn">Buy Cargo Ship (<span id="cargoShipPrice">2000</span> credits)</button>
+                        <button id="buyCargoShipBtn" class="recruit-btn">Buy Cargo Ship (<span id="cargoShipPrice">1000</span> credits)</button>
+                    </div>
+                    <div class="store-item" id="nebuclearStoreItem">
+                        <h3>Nebuclear</h3>
+                        <p>Makes nebulae disappear when you fire into them</p>
+                        <button id="buyNebuclearBtn" class="recruit-btn">Buy Nebuclear (400 credits)</button>
                     </div>
                 </div>
             </div>
             <button id="closeCommandModule">Close (ESC)</button>
         </div>
     </div>
-    <script src="game.js"></script>
+    <script type="module" src="game.js"></script>
 </body>
 </html>
 

@@ -1,5 +1,28 @@
+// WebGL imports
+import { WebGLRenderer } from './src/rendering/webgl/WebGLRenderer.js';
+import { SpriteRenderer } from './src/rendering/webgl/SpriteRenderer.js';
+import { ParticleRenderer } from './src/rendering/webgl/ParticleRenderer.js';
+import { TrailRenderer } from './src/rendering/webgl/TrailRenderer.js';
+import { CircleRenderer } from './src/rendering/webgl/CircleRenderer.js';
+import { NebulaRenderer } from './src/rendering/webgl/NebulaRenderer.js';
+import { ColorUtils } from './src/rendering/webgl/utils/ColorUtils.js';
+
 let canvas;
 let ctx;
+let webglRenderer = null;
+let spriteRenderer = null;
+let particleRenderer = null;
+let trailRenderer = null;
+let circleRenderer = null;
+let nebulaRenderer = null;
+let useWebGL = false;
+let textures = {}; // Cache for loaded textures
+
+const urlParams = new URLSearchParams(window.location.search);
+const OFFLINE_MODE = urlParams.get('offline') === '1';
+const HEADLESS_MODE = urlParams.get('headless') === '1';
+const OBSERVER_MODE = urlParams.get('observe') === '1';
+const SPEED_MULTIPLIER = OFFLINE_MODE && HEADLESS_MODE ? parseFloat(urlParams.get('speed') || '5') : 1;
 
 // Game state
 let gameState = {
@@ -45,6 +68,22 @@ function initPlayerShipImage() {
         playerShipImageLoaded = false;
     };
     playerShipImage.src = 'ship.png';
+}
+
+// Damaged player ship image
+let damagedPlayerShipImage = null;
+let damagedPlayerShipImageLoaded = false;
+
+function initDamagedPlayerShipImage() {
+    damagedPlayerShipImage = new Image();
+    damagedPlayerShipImage.onload = () => {
+        damagedPlayerShipImageLoaded = true;
+    };
+    damagedPlayerShipImage.onerror = () => {
+        console.warn('Failed to load damagedShip.png, will use regular ship');
+        damagedPlayerShipImageLoaded = false;
+    };
+    damagedPlayerShipImage.src = 'damagedShip.png';
 }
 
 // Planet images
@@ -107,6 +146,84 @@ function initEnemyShipImage() {
         enemyShipImageLoaded = false;
     };
     enemyShipImage.src = 'enemyship.png';
+}
+
+// Boss ship image
+let bossShipImage = null;
+let bossShipImageLoaded = false;
+
+function initBossShipImage() {
+    bossShipImage = new Image();
+    bossShipImage.onload = () => {
+        bossShipImageLoaded = true;
+    };
+    bossShipImage.onerror = () => {
+        console.warn('Failed to load boss.png, using drawn shape');
+        bossShipImageLoaded = false;
+    };
+    bossShipImage.src = 'boss.png';
+}
+
+// Ally ship image
+let allyShipImage = null;
+let allyShipImageLoaded = false;
+
+function initAllyShipImage() {
+    allyShipImage = new Image();
+    allyShipImage.onload = () => {
+        allyShipImageLoaded = true;
+    };
+    allyShipImage.onerror = () => {
+        console.warn('Failed to load ally.png, using drawn shape');
+        allyShipImageLoaded = false;
+    };
+    allyShipImage.src = 'ally.png';
+}
+
+// Token image (for powerups)
+let tokenImage = null;
+let tokenImageLoaded = false;
+
+function initTokenImage() {
+    tokenImage = new Image();
+    tokenImage.onload = () => {
+        tokenImageLoaded = true;
+    };
+    tokenImage.onerror = () => {
+        console.warn('Failed to load token.png, using drawn shape');
+        tokenImageLoaded = false;
+    };
+    tokenImage.src = 'token.png';
+}
+
+// Crew images (for crew allocation UI)
+let crewImage = null;
+let crewImageLoaded = false;
+let crew1Image = null;
+let crew1ImageLoaded = false;
+
+function initCrewImage() {
+    // Load crew.png
+    crewImage = new Image();
+    crewImage.onload = () => {
+        crewImageLoaded = true;
+    };
+    crewImage.onerror = () => {
+        console.warn('Failed to load crew.png, using default styling');
+        crewImageLoaded = false;
+    };
+    crewImage.src = 'crew.png';
+    
+    // Load crew1.png (alternate variation)
+    crew1Image = new Image();
+    crew1Image.onload = () => {
+        crew1ImageLoaded = true;
+    };
+    crew1Image.onerror = () => {
+        console.warn('Failed to load crew1.png, will use crew.png only');
+        crew1ImageLoaded = false;
+    };
+    crew1Image.src = 'crew1.png';
 }
 
 // Player
@@ -180,6 +297,7 @@ const weapons = {
 // Arrays
 let bullets = [];
 let enemies = [];
+let bosses = []; // Boss enemies
 let asteroids = [];
 let nebulas = [];
 let powerups = [];
@@ -216,8 +334,10 @@ function saveHighScore(score) {
 
 // Mission mode objects
 let cargoVessels = []; // Changed to array to support multiple cargo ships
+let cargoVessel = null; // Single cargo vessel for mission mode
 let cargoShipCount = 0; // Track number of cargo ships purchased
-let cargoShipPrice = 2000; // Base price for cargo ships
+let cargoShipPrice = 1000; // Base price for cargo ships
+let hasNebuclear = false; // Nebuclear device - makes nebulae disappear when shot
 let startPlanet = null;
 let endPlanet = null;
 
@@ -232,6 +352,23 @@ let mouseButtonDown = false;
 let mobileTractorBeamActive = false;
 let mobileRotateLeft = false;
 let mobileRotateRight = false;
+
+// RL Agent / Autopilot System
+let autopilotEnabled = false;
+let rlAgent = null;  // Will hold RL agent (PPO)
+let agentLoadPromise = null;
+
+// Training statistics
+let trainingStats = {
+    episode: 0,
+    episodeReward: 0,
+    episodeLength: 0,
+    totalReward: 0,
+    bestScore: 0,
+    episodes: [],
+    rewards: [],
+    scores: []
+};
 
 // Sound System
 let audioContext;
@@ -544,6 +681,46 @@ const crewEffects = {
 let displayWidth = window.innerWidth;
 let displayHeight = window.innerHeight;
 
+// Load textures for WebGL
+async function loadTextures() {
+    if (!webglRenderer || !webglRenderer.textureManager) {
+        console.warn('WebGL renderer or texture manager not available');
+        return;
+    }
+    
+    const textureManager = webglRenderer.textureManager;
+    
+    try {
+        console.log('Loading WebGL textures...');
+        textures.background = await textureManager.loadTexture('background.png');
+        console.log('Loaded background texture:', textures.background);
+        textures.ship = await textureManager.loadTexture('ship.png');
+        console.log('Loaded ship texture:', textures.ship, 'Type:', textures.ship?.constructor?.name);
+        textures.damagedShip = await textureManager.loadTexture('damagedShip.png');
+        console.log('Loaded damagedShip texture:', textures.damagedShip);
+        textures.enemyShip = await textureManager.loadTexture('enemyship.png');
+        console.log('Loaded enemyShip texture:', textures.enemyShip);
+        textures.boss = await textureManager.loadTexture('boss.png');
+        console.log('Loaded boss texture:', textures.boss);
+        textures.ally = await textureManager.loadTexture('ally.png', { removeBlackBackground: true });
+        console.log('Loaded ally texture:', textures.ally);
+        textures.token = await textureManager.loadTexture('token.png', { removeWhiteBackground: true });
+        console.log('Loaded token texture:', textures.token);
+        console.log('Loaded enemyShip texture:', textures.enemyShip);
+        textures.cargoShip = await textureManager.loadTexture('cargoship.png');
+        console.log('Loaded cargoShip texture:', textures.cargoShip);
+        textures.planet1 = await textureManager.loadTexture('planet1.png');
+        console.log('Loaded planet1 texture:', textures.planet1);
+        textures.planet2 = await textureManager.loadTexture('planet2.png');
+        console.log('Loaded planet2 texture:', textures.planet2);
+        textures.asteroid = await textureManager.loadTexture('asteroid.png');
+        console.log('Loaded asteroid texture:', textures.asteroid);
+        console.log('All textures loaded successfully');
+    } catch (err) {
+        console.error('Some textures failed to load:', err);
+    }
+}
+
 // Function to set up canvas with proper device pixel ratio for high-DPI displays
 function setupCanvas() {
     if (!canvas) return;
@@ -555,16 +732,26 @@ function setupCanvas() {
     displayWidth = window.innerWidth;
     displayHeight = window.innerHeight;
     
-    // Set canvas internal resolution (actual pixels)
+    if (useWebGL && webglRenderer) {
+        // Use WebGL renderer resize
+        webglRenderer.resize(displayWidth, displayHeight);
+        
+        // Update projection matrices for renderers
+        const projectionMatrix = webglRenderer.getProjectionMatrix();
+        if (spriteRenderer) spriteRenderer.setProjection(projectionMatrix);
+        if (particleRenderer) particleRenderer.setProjection(projectionMatrix);
+        if (trailRenderer) trailRenderer.setProjection(projectionMatrix);
+        if (circleRenderer) circleRenderer.setProjection(projectionMatrix);
+    } else if (ctx) {
+        // Canvas 2D fallback
     canvas.width = displayWidth * dpr;
     canvas.height = displayHeight * dpr;
-    
-    // Set canvas CSS size (display size)
     canvas.style.width = displayWidth + 'px';
     canvas.style.height = displayHeight + 'px';
     
     // Scale context to match device pixel ratio
     ctx.scale(dpr, dpr);
+    }
 }
 
 // Helper functions to get display dimensions (for game logic)
@@ -587,6 +774,18 @@ function getCanvasHeight() {
     });
 
 document.addEventListener('keydown', (e) => {
+    // Autopilot toggle (U key) - always works
+    if ((e.key === 'u' || e.key === 'U') && gameState.running && !gameState.paused) {
+        toggleAutopilot();
+        e.preventDefault();
+        return;
+    }
+    
+    // Ignore other input if autopilot is enabled
+    if (autopilotEnabled) {
+        return;
+    }
+    
     keys[e.key.toLowerCase()] = true;
     if (e.key === ' ') e.preventDefault();
     // Resume audio context on first user interaction
@@ -617,6 +816,11 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('keyup', (e) => {
+    // Ignore key releases if autopilot is enabled (except U for toggle)
+    if (autopilotEnabled && e.key !== 'u' && e.key !== 'U') {
+        return;
+    }
+    
     keys[e.key.toLowerCase()] = false;
     
     // Deactivate tractor beam when key is released
@@ -658,7 +862,7 @@ function setupMouseControls() {
     
     // Mouse button events for shooting
     canvas.addEventListener('mousedown', (e) => {
-        if (e.button === 0) { // Left mouse button
+        if (e.button === 0 && !autopilotEnabled) { // Left mouse button, only if autopilot off
             mouseButtonDown = true;
             e.preventDefault();
         }
@@ -703,19 +907,37 @@ function setupMouseControls() {
 
 // Draw starfield
 function drawStarfield() {
-    if (!ctx || !canvas) return;
-    
-    // Clear canvas first for better performance
+    if (useWebGL && webglRenderer) {
+        // WebGL rendering
+        webglRenderer.clear(0, 0, 0, 1); // Black background
+        
+        if (textures.background && spriteRenderer) {
+            const width = webglRenderer.getWidth() * webglRenderer.getDPR();
+            const height = webglRenderer.getHeight() * webglRenderer.getDPR();
+            spriteRenderer.begin();
+            // Draw background centered at origin, covering full screen
+            spriteRenderer.drawSprite(
+                textures.background,
+                width / 2, height / 2,  // Center position
+                width,
+                height,
+                0,
+                null,  // No color tint
+                0.5, 0.5  // Center origin
+            );
+            spriteRenderer.end();
+        }
+    } else if (ctx && canvas) {
+        // Canvas 2D fallback
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     // Draw background image if loaded, otherwise black background
     if (backgroundImageLoaded && backgroundImage) {
-        // Draw background image, scaled to cover the canvas
         ctx.drawImage(backgroundImage, 0, 0, getCanvasWidth(), getCanvasHeight());
     } else {
-        // Fallback to black background
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, getCanvasWidth(), getCanvasHeight());
+        }
     }
 }
 
@@ -766,7 +988,11 @@ function drawGameTitle() {
 
 // Player movement
 function updatePlayer() {
-    if (!canvas || !player || gameState.paused) return;
+    if (!canvas || !player) return;
+    
+    // Allow autopilot to run even when paused (for upgrade selection)
+    // But skip normal player input when paused
+    if (gameState.paused && !autopilotEnabled) return;
     
     // Ensure player position is valid
     if (isNaN(player.x)) player.x = getCanvasWidth() / 2;
@@ -777,6 +1003,11 @@ function updatePlayer() {
     const effectiveSpeed = player.speed * speedMultiplier;
     
     let wasMoving = false;
+    
+    // Autopilot control (if enabled) - must run FIRST to set keys
+    if (autopilotEnabled && gameState.running && !gameState.paused) {
+        autopilotStep();
+    }
     
     // Rotation logic - depends on tractor beam state
     // Check if tractor beam is active - if so, lock rotation to face target
@@ -816,8 +1047,8 @@ function updatePlayer() {
     }
     
     // Movement logic - works regardless of tractor beam state
-    // Mouse/trackpad control (takes priority if active)
-    if (mouseActive && mouseX >= 0 && mouseY >= 0 && mouseX <= getCanvasWidth() && mouseY <= getCanvasHeight()) {
+    // Mouse/trackpad control (takes priority if active) - BUT NOT WHEN AUTOPILOT IS ON
+    if (!autopilotEnabled && mouseActive && mouseX >= 0 && mouseY >= 0 && mouseX <= getCanvasWidth() && mouseY <= getCanvasHeight()) {
         const dx = mouseX - player.x;
         const dy = mouseY - player.y;
         const distance = Math.hypot(dx, dy);
@@ -918,7 +1149,7 @@ function updatePlayer() {
         }
     });
 
-    // Shooting
+    // Shooting (only if autopilot is off, or if autopilot triggered it)
     // Mouse button or spacebar for primary weapon
     if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0) {
         shoot('primary');
@@ -931,6 +1162,24 @@ function updatePlayer() {
     }
     if (keys['3'] && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
         shoot('cluster');
+    }
+    
+    // Add smoke particles when damaged (in update, not draw)
+    const healthPercent = player.health / player.maxHealth;
+    if (healthPercent < 0.7 && Math.random() < 0.3) {
+        const smokeX = player.x + (Math.random() - 0.5) * player.width * 0.8;
+        const smokeY = player.y + (Math.random() - 0.5) * player.height * 0.8;
+        particles.push({
+            x: smokeX,
+            y: smokeY,
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: (Math.random() - 0.5) * 0.5,
+            life: 30,
+            maxLife: 30,
+            size: 3 + Math.random() * 2,
+            color: `hsl(0, 0%, ${30 + Math.random() * 20}%)`, // Gray smoke
+            glow: false
+        });
     }
 }
 
@@ -1142,6 +1391,26 @@ function updateBullets() {
             }
         }
 
+        // Check collisions with nebulae (Nebuclear device makes them disappear)
+        if (!shouldRemove && hasNebuclear && (bullet.type === 'primary' || bullet.type === 'missile' || bullet.type === 'laser' || bullet.type === 'ally' || bullet.type === 'cluster')) {
+            for (let i = 0; i < nebulas.length; i++) {
+                const nebula = nebulas[i];
+                // Check if bullet is within nebula bounds
+                const dist = Math.hypot(bullet.x - nebula.x, bullet.y - nebula.y);
+                if (dist < nebula.width / 2) {
+                    // Nebuclear makes nebula disappear
+                    createExplosion(bullet.x, bullet.y, 30);
+                    sounds.enemyExplosion();
+                    nebulas.splice(i, 1);
+                    i--; // Adjust index after removal
+                    if (!bullet.pierce || bullet.type === 'cluster') {
+                        shouldRemove = true;
+                        break;
+                    }
+                }
+            }
+        }
+
         // Remove bullet if it hit something (and doesn't pierce) or is out of bounds
         if (shouldRemove) {
             return false;
@@ -1243,6 +1512,73 @@ function spawnEnemy() {
     });
 }
 
+// Spawn boss (appears every 1000 points)
+function spawnBoss() {
+    // Difficulty scales with cumulative credits
+    const creditDifficulty = cumulativeCredits / 100;
+    const difficulty = creditDifficulty * 0.05;
+    
+    // Spawn from random edge
+    const edge = Math.floor(Math.random() * 4);
+    let x, y, vx, vy;
+    
+    switch(edge) {
+        case 0: // Top
+            x = getCanvasWidth() / 2 + (Math.random() - 0.5) * 200;
+            y = -50;
+            vx = (Math.random() - 0.5) * 0.5;
+            vy = 0.3 + Math.random() * 0.3;
+            break;
+        case 1: // Right
+            x = getCanvasWidth() + 50;
+            y = getCanvasHeight() / 2 + (Math.random() - 0.5) * 200;
+            vx = -(0.3 + Math.random() * 0.3);
+            vy = (Math.random() - 0.5) * 0.5;
+            break;
+        case 2: // Bottom
+            x = getCanvasWidth() / 2 + (Math.random() - 0.5) * 200;
+            y = getCanvasHeight() + 50;
+            vx = (Math.random() - 0.5) * 0.5;
+            vy = -(0.3 + Math.random() * 0.3);
+            break;
+        case 3: // Left
+            x = -50;
+            y = getCanvasHeight() / 2 + (Math.random() - 0.5) * 200;
+            vx = 0.3 + Math.random() * 0.3;
+            vy = (Math.random() - 0.5) * 0.5;
+            break;
+    }
+    
+    // Boss is 3x stronger than average enemy
+    const baseHealth = 20 + creditDifficulty * 8;
+    const baseDamage = 6 + creditDifficulty * 1.5;
+    const baseWidth = 30 + Math.random() * 20;
+    const baseHeight = 30 + Math.random() * 20;
+    
+    bosses.push({
+        x: x,
+        y: y,
+        width: baseWidth * 3, // 3x size (50% bigger than previous 2x)
+        height: baseHeight * 3,
+        vx: vx,
+        vy: vy,
+        health: baseHealth * 3, // 3x health
+        maxHealth: baseHealth * 3,
+        color: `hsl(0, 100%, 50%)`, // Red color for boss
+        glowColor: `hsl(0, 100%, 70%)`,
+        shootCooldown: Math.max(20, 100 - creditDifficulty * 2), // Faster shooting
+        damage: baseDamage * 3, // 3x damage
+        rotation: 0,
+        targetRotation: 0,
+        lastNebulaDamageTime: 0,
+        pursuitSpeed: 0.5 + difficulty * 0.4, // Slightly faster
+        targetType: 'player',
+        targetSwitchCooldown: 0,
+        circleDirection: Math.random() < 0.5 ? 1 : -1,
+        isBoss: true // Mark as boss
+    });
+}
+
 // Spawn asteroids
 function spawnAsteroid() {
     const size = 20 + Math.random() * 40;
@@ -1279,8 +1615,45 @@ function spawnAsteroid() {
 
 // Spawn nebulas
 function spawnNebula() {
-    const size = 80 + Math.random() * 120;
-    const hue = 240 + Math.random() * 60; // Purple/blue colors
+    const size = 100 + Math.random() * 150; // Slightly larger for more impressive clouds
+    
+    // Colorful palette: blues, cyans, purples, magentas, reds, and pinks
+    // Hue range: 0-360 (full spectrum, but focusing on cool colors and warm reds/pinks)
+    const colorType = Math.random();
+    let hue, saturation, lightness;
+    
+    if (colorType < 0.2) {
+        // Light blue/cyan (180-220) - vibrant blues
+        hue = 180 + Math.random() * 40;
+        saturation = 80 + Math.random() * 20; // 80-100% - very saturated
+        lightness = 55 + Math.random() * 20; // 55-75% - bright
+    } else if (colorType < 0.4) {
+        // Bright cyan/blue (200-240) - very vibrant
+        hue = 200 + Math.random() * 40;
+        saturation = 85 + Math.random() * 15; // 85-100% - very saturated
+        lightness = 60 + Math.random() * 20; // 60-80% - bright
+    } else if (colorType < 0.6) {
+        // Purple/indigo (240-280) - vibrant purples
+        hue = 240 + Math.random() * 40;
+        saturation = 80 + Math.random() * 20; // 80-100% - very saturated
+        lightness = 55 + Math.random() * 20; // 55-75% - bright
+    } else if (colorType < 0.75) {
+        // Magenta/pink (280-320) - vibrant magentas and pinks
+        hue = 280 + Math.random() * 40;
+        saturation = 85 + Math.random() * 15; // 85-100% - very saturated
+        lightness = 60 + Math.random() * 20; // 60-80% - bright
+    } else if (colorType < 0.9) {
+        // Light red/pink (0-30 and 330-360) - warm reds and pinks
+        // Wrap around the hue circle for reds
+        hue = Math.random() < 0.5 ? Math.random() * 30 : 330 + Math.random() * 30;
+        saturation = 75 + Math.random() * 20; // 75-95% - very saturated
+        lightness = 60 + Math.random() * 20; // 60-80% - bright
+    } else {
+        // Light purple (270-300) - soft purples
+        hue = 270 + Math.random() * 30;
+        saturation = 70 + Math.random() * 25; // 70-95% - saturated
+        lightness = 65 + Math.random() * 15; // 65-80% - very light
+    }
     
     // Spawn from a random edge of the screen
     const edge = Math.floor(Math.random() * 4); // 0=top, 1=right, 2=bottom, 3=left
@@ -1313,19 +1686,49 @@ function spawnNebula() {
             break;
     }
     
-    // Generate cloud blobs for morphing cloud shape
+    // Generate many cloud blobs with noise-like distribution for organic cloud appearance
     const cloudBlobs = [];
-    const blobCount = 4 + Math.floor(Math.random() * 4); // 4-7 blobs (reduced for performance)
+    const blobCount = 20 + Math.floor(Math.random() * 15); // 20-34 blobs for dense, continuous clouds
+    
+    // Create a more organic distribution using multiple layers
     for (let i = 0; i < blobCount; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = (Math.random() * 0.6 + 0.2) * size / 2; // Random distance from center
+        // Use a noise-like distribution pattern for more organic appearance
+        const layer = Math.floor(i / (blobCount / 3)); // 3 layers: core, mid, outer
+        const layerProgress = (i % (blobCount / 3)) / (blobCount / 3);
+        
+        let angle, dist, baseRadius;
+        if (layer === 0) {
+            // Core layer - dense center
+            angle = layerProgress * Math.PI * 2 + Math.random() * 0.5;
+            dist = (Math.random() * 0.3 + 0.05) * size / 2; // Close to center
+            baseRadius = size * (0.15 + Math.random() * 0.2); // Larger core blobs
+        } else if (layer === 1) {
+            // Mid layer - medium density
+            angle = layerProgress * Math.PI * 2 + Math.random() * 0.8;
+            dist = (Math.random() * 0.4 + 0.2) * size / 2; // Medium distance
+            baseRadius = size * (0.1 + Math.random() * 0.25); // Medium blobs
+        } else {
+            // Outer layer - sparse edges
+            angle = layerProgress * Math.PI * 2 + Math.random() * 1.2;
+            dist = (Math.random() * 0.5 + 0.4) * size / 2; // Far from center
+            baseRadius = size * (0.08 + Math.random() * 0.2); // Smaller edge blobs
+        }
+        
+        // Add some randomness for organic feel
+        angle += (Math.random() - 0.5) * 0.3;
+        dist += (Math.random() - 0.5) * size * 0.1;
+        
         cloudBlobs.push({
             x: Math.cos(angle) * dist,
             y: Math.sin(angle) * dist,
-            radius: size * (0.15 + Math.random() * 0.25), // Varying blob sizes
-            vx: (Math.random() - 0.5) * 0.3, // Slow drift velocity
-            vy: (Math.random() - 0.5) * 0.3,
-            phase: Math.random() * Math.PI * 2 // For morphing animation
+            radius: baseRadius,
+            baseRadius: baseRadius,
+            vx: (Math.random() - 0.5) * 0.4,
+            vy: (Math.random() - 0.5) * 0.4,
+            phase: Math.random() * Math.PI * 2,
+            morphSpeed: 0.3 + Math.random() * 0.4,
+            sizeVariation: 0.15 + Math.random() * 0.25,
+            density: 0.6 + Math.random() * 0.4 // Varying density for more organic look
         });
     }
     
@@ -1338,13 +1741,14 @@ function spawnNebula() {
         vy: vy,
         rotation: Math.random() * Math.PI * 2,
         rotationSpeed: (Math.random() - 0.5) * 0.02,
-        color: `hsl(${hue}, 70%, 50%)`,
-        glowColor: `hsl(${hue}, 100%, 70%)`,
+        color: `hsl(${hue}, ${saturation}%, ${lightness}%)`,
+        glowColor: `hsl(${hue}, ${Math.min(100, saturation + 20)}%, ${Math.min(80, lightness + 20)}%)`, // Brighter glow
         damagePerSecond: 2 + (cumulativeCredits / 100) * 0.5, // Scale with cumulative credits
         lastPlayerDamageTime: 0,
         lastCargoDamageTime: 0,
         cloudBlobs: cloudBlobs,
-        morphTime: Math.random() * Math.PI * 2 // Starting phase for morphing
+        morphTime: Math.random() * Math.PI * 2, // Starting phase for morphing
+        morphSpeed: 0.015 + Math.random() * 0.01 // Overall morph speed (0.015-0.025)
     });
 }
 
@@ -1358,38 +1762,49 @@ function updateNebulas() {
         nebula.y += nebula.vy;
         nebula.rotation += nebula.rotationSpeed;
         
-        // Morph cloud blobs over time
+        // Morph cloud blobs over time - more dramatic morphing
         if (nebula.morphTime !== undefined) {
-            nebula.morphTime += 0.01; // Slow morphing animation
+            nebula.morphSpeed = nebula.morphSpeed || 0.02;
+            nebula.morphTime += nebula.morphSpeed; // Variable morphing speed
         } else {
             nebula.morphTime = Math.random() * Math.PI * 2; // Initialize if missing
+            nebula.morphSpeed = 0.015 + Math.random() * 0.01;
         }
         
         if (nebula.cloudBlobs) {
             nebula.cloudBlobs.forEach(blob => {
-                // Update blob position with slow drift and morphing
-                blob.x += blob.vx * 0.1;
-                blob.y += blob.vy * 0.1;
+                // Update blob position with slow drift
+                blob.x += blob.vx * 0.15;
+                blob.y += blob.vy * 0.15;
                 
-                // Add morphing motion using sine waves
-                const morphX = Math.sin(nebula.morphTime + blob.phase) * 2;
-                const morphY = Math.cos(nebula.morphTime * 0.7 + blob.phase) * 2;
-                blob.x += morphX * 0.1;
-                blob.y += morphY * 0.1;
+                // More dramatic morphing motion using multiple sine waves for organic cloud movement
+                const morphSpeed = blob.morphSpeed || 1.0;
+                const morphX1 = Math.sin(nebula.morphTime * morphSpeed + blob.phase) * 4;
+                const morphY1 = Math.cos(nebula.morphTime * morphSpeed * 0.7 + blob.phase) * 4;
+                const morphX2 = Math.sin(nebula.morphTime * morphSpeed * 0.5 + blob.phase * 1.3) * 3;
+                const morphY2 = Math.cos(nebula.morphTime * morphSpeed * 0.8 + blob.phase * 1.7) * 3;
                 
-                // Keep blobs within reasonable bounds (soft constraint)
+                blob.x += (morphX1 + morphX2) * 0.15; // More pronounced movement
+                blob.y += (morphY1 + morphY2) * 0.15;
+                
+                // Keep blobs within reasonable bounds (soft constraint with more flexibility)
                 const distFromCenter = Math.sqrt(blob.x * blob.x + blob.y * blob.y);
-                const maxDist = nebula.width / 2 * 1.2;
+                const maxDist = nebula.width / 2 * 1.5; // Allow more spread
                 if (distFromCenter > maxDist) {
                     // Gently pull back toward center
-                    blob.x *= 0.95;
-                    blob.y *= 0.95;
+                    const pullFactor = 0.97;
+                    blob.x *= pullFactor;
+                    blob.y *= pullFactor;
                 }
                 
-                // Slight size variation for more organic feel
-                const baseRadius = nebula.width * (0.15 + (blob.radius / nebula.width - 0.15) * 0.5);
-                blob.radius = baseRadius + Math.sin(nebula.morphTime * 0.5 + blob.phase) * (nebula.width * 0.05);
-                blob.radius = Math.max(nebula.width * 0.1, Math.min(nebula.width * 0.4, blob.radius));
+                // More dramatic size variation for shifting cloud appearance
+                const sizeVariation = blob.sizeVariation || 0.2;
+                const sizeWave1 = Math.sin(nebula.morphTime * morphSpeed * 0.6 + blob.phase);
+                const sizeWave2 = Math.cos(nebula.morphTime * morphSpeed * 0.4 + blob.phase * 1.5);
+                const sizeChange = (sizeWave1 + sizeWave2 * 0.5) * sizeVariation;
+                
+                blob.radius = blob.baseRadius * (1 + sizeChange);
+                blob.radius = Math.max(nebula.width * 0.08, Math.min(nebula.width * 0.45, blob.radius));
             });
         }
         
@@ -1523,6 +1938,210 @@ function hslToRgba(hsl, alpha) {
 
 // Draw nebulas
 function drawNebulas() {
+    if (useWebGL && nebulaRenderer) {
+        // WebGL rendering - draw nebulas as organic gas clouds with rounded edges
+        nebulaRenderer.begin();
+        
+        // Debug: Log nebula count
+        if (nebulas.length > 0 && nebulas.length % 10 === 0) {
+            console.log(`Drawing ${nebulas.length} nebulae`);
+        }
+        
+        nebulas.forEach((nebula, nebulaIndex) => {
+            // Parse the HSL values directly to ensure we get vibrant colors
+            // Match decimal numbers: (\d+\.?\d*) instead of just (\d+)
+            const baseColorMatch = nebula.color.match(/hsl\(([\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\)/);
+            const glowColorMatch = nebula.glowColor.match(/hsl\(([\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\)/);
+            
+            let baseColorParsed, glowColorParsed;
+            
+            if (baseColorMatch && glowColorMatch) {
+                // Boost saturation and lightness significantly for vibrant colors
+                const baseH = parseFloat(baseColorMatch[1]);
+                const baseS = Math.min(100, parseFloat(baseColorMatch[2]) + 30); // +30% saturation
+                const baseL = Math.min(75, parseFloat(baseColorMatch[3]) + 15); // +15% lightness
+                
+                const glowH = parseFloat(glowColorMatch[1]);
+                const glowS = Math.min(100, parseFloat(glowColorMatch[2]) + 30);
+                const glowL = Math.min(80, parseFloat(glowColorMatch[3]) + 20);
+                
+                // Parse with boosted values - ColorUtils.hslToRgba expects h in 0-360, s and l in 0-100
+                baseColorParsed = ColorUtils.hslToRgba(baseH, baseS, baseL, 1.0);
+                glowColorParsed = ColorUtils.hslToRgba(glowH, glowS, glowL, 1.0);
+                
+                // Debug: Verify the conversion worked (only first nebula to avoid spam)
+                if (nebulaIndex === 0) {
+                    console.log('✅ HSL parsed successfully:', {
+                        original: nebula.color,
+                        boosted: `hsl(${baseH.toFixed(1)}, ${baseS.toFixed(1)}%, ${baseL.toFixed(1)}%)`,
+                        baseRGB: `rgb(${Math.round(baseColorParsed[0]*255)}, ${Math.round(baseColorParsed[1]*255)}, ${Math.round(baseColorParsed[2]*255)})`,
+                        glowRGB: `rgb(${Math.round(glowColorParsed[0]*255)}, ${Math.round(glowColorParsed[1]*255)}, ${Math.round(glowColorParsed[2]*255)})`
+                    });
+                }
+            } else {
+                // Fallback parsing - this shouldn't happen now, but keep as safety
+                console.warn('⚠️ Failed to match HSL pattern:', nebula.color, nebula.glowColor);
+                baseColorParsed = ColorUtils.parseColor(nebula.color, 1.0);
+                glowColorParsed = ColorUtils.parseColor(nebula.glowColor, 1.0);
+            }
+            
+            if (nebula.cloudBlobs && nebula.cloudBlobs.length > 0) {
+                // Draw each cloud blob as many overlapping organic-shaped sprites
+                nebula.cloudBlobs.forEach((blob, index) => {
+                    const distFromCenter = Math.sqrt(blob.x * blob.x + blob.y * blob.y);
+                    const normalizedDist = distFromCenter / (nebula.width / 2);
+                    const baseOpacity = (1 - normalizedDist * 0.2) * 1.0; // Full opacity for vibrant colors
+                    
+                    // Convert blob position to world coordinates
+                    const cos = Math.cos(nebula.rotation);
+                    const sin = Math.sin(nebula.rotation);
+                    const worldX = nebula.x + blob.x * cos - blob.y * sin;
+                    const worldY = nebula.y + blob.x * sin + blob.y * cos;
+                    
+                    // Create smooth gradient effect with many overlapping organic shapes
+                    const sizeFactor = blob.radius / (nebula.width * 0.3);
+                    const depthOpacity = Math.min(1.0, baseOpacity * (0.8 + sizeFactor * 0.4));
+                    const density = blob.density || 1.0;
+                    
+                    // Draw fewer, larger sprites with higher opacity to preserve colors
+                    // Too many overlapping sprites wash out colors even with normal blending
+                    const numSprites = Math.floor(6 * density); // Much fewer sprites
+                    
+                    for (let s = 0; s < numSprites; s++) {
+                        const spriteProgress = s / Math.max(1, numSprites - 1);
+                        
+                        // Vary sprite size and position for organic cloud shape
+                        const spriteSize = blob.radius * (0.5 + (1 - spriteProgress) * 0.5);
+                        const spriteWidth = spriteSize * (0.7 + Math.random() * 0.6);
+                        const spriteHeight = spriteSize * (0.7 + Math.random() * 0.6);
+                        
+                        // Random offset within blob area for organic distribution
+                        const offsetAngle = (s / numSprites) * Math.PI * 2 + blob.phase;
+                        const offsetDist = blob.radius * (0.1 + spriteProgress * 0.6);
+                        const offsetX = worldX + Math.cos(offsetAngle) * offsetDist;
+                        const offsetY = worldY + Math.sin(offsetAngle) * offsetDist;
+                        
+                        // Vary rotation for more organic appearance
+                        const spriteRotation = offsetAngle + (Math.random() - 0.5) * 0.8;
+                        
+                        // Higher opacity per sprite to make colors more visible
+                        // With fewer sprites, each one needs to be more opaque
+                        const spriteOpacity = Math.min(1.0, depthOpacity * density * (0.8 + spriteProgress * 0.2));
+                        
+                        // Blend from outer color to inner glow color - use actual parsed colors
+                        // Ensure colors are vibrant and not washed out
+                        let spriteColor;
+                        if (spriteProgress < 0.3) {
+                            // Outer sprites use base color - ensure full color intensity
+                            spriteColor = new Float32Array([
+                                baseColorParsed[0], 
+                                baseColorParsed[1], 
+                                baseColorParsed[2], 
+                                spriteOpacity
+                            ]);
+                        } else if (spriteProgress < 0.7) {
+                            // Middle sprites blend between color and glow
+                            const blend = (spriteProgress - 0.3) / 0.4;
+                            spriteColor = new Float32Array([
+                                baseColorParsed[0] * (1 - blend) + glowColorParsed[0] * blend,
+                                baseColorParsed[1] * (1 - blend) + glowColorParsed[1] * blend,
+                                baseColorParsed[2] * (1 - blend) + glowColorParsed[2] * blend,
+                                spriteOpacity
+                            ]);
+                        } else {
+                            // Inner sprites use glow color - ensure full color intensity
+                            spriteColor = new Float32Array([
+                                glowColorParsed[0], 
+                                glowColorParsed[1], 
+                                glowColorParsed[2], 
+                                spriteOpacity
+                            ]);
+                        }
+                        
+                        // Debug: Log first sprite color of first nebula
+                        if (nebulaIndex === 0 && s === 0 && blob === nebula.cloudBlobs[0]) {
+                            console.log('Sprite color debug:', {
+                                spriteProgress,
+                                baseColor: [baseColorParsed[0], baseColorParsed[1], baseColorParsed[2]],
+                                glowColor: [glowColorParsed[0], glowColorParsed[1], glowColorParsed[2]],
+                                finalColor: [spriteColor[0], spriteColor[1], spriteColor[2]],
+                                alpha: spriteColor[3]
+                            });
+                        }
+                        
+                        // Draw organic-shaped sprite (rectangle at angle) with rounded edges
+                        nebulaRenderer.drawSprite(
+                            offsetX, offsetY,
+                            spriteWidth, spriteHeight,
+                            spriteRotation,
+                            spriteColor,
+                            0.5, 0.5 // Center origin
+                        );
+                    }
+                    
+                    // Add flowing wisps using elongated sprites
+                    const wispCount = Math.floor(blob.radius / 10) + 3;
+                    for (let w = 0; w < wispCount; w++) {
+                        const wispPhase = blob.phase + (w / wispCount) * Math.PI * 2;
+                        const morphSpeed = blob.morphSpeed || 1.0;
+                        const wispAngle = nebula.morphTime * morphSpeed * 0.3 + wispPhase;
+                        const wispDist = blob.radius * (0.2 + (w / wispCount) * 0.7);
+                        const wispX = worldX + Math.cos(wispAngle) * wispDist;
+                        const wispY = worldY + Math.sin(wispAngle) * wispDist;
+                        
+                        // Elongated sprites for wispy tendrils
+                        const wispLength = blob.radius * (0.5 + Math.random() * 0.5);
+                        const wispWidth = blob.radius * (0.2 + Math.random() * 0.2);
+                        const wispOpacity = Math.min(1.0, depthOpacity * density * (0.7 + Math.random() * 0.3));
+                        const wispColor = new Float32Array([
+                            glowColorParsed[0], glowColorParsed[1], glowColorParsed[2], wispOpacity
+                        ]);
+                        
+                        nebulaRenderer.drawSprite(
+                            wispX, wispY,
+                            wispLength, wispWidth,
+                            wispAngle,
+                            wispColor,
+                            0.5, 0.5
+                        );
+                    }
+                });
+                
+                // Draw bright core in center with multiple overlapping sprites
+                const coreSize = nebula.width / 4;
+                
+                // Draw core as multiple overlapping sprites for bright center
+                for (let c = 0; c < 6; c++) {
+                    const coreProgress = c / 5;
+                    const coreSpriteSize = coreSize * (1 - coreProgress * 0.65);
+                    const coreOpacity = 1.0; // Full opacity for vibrant core colors
+                    const coreSpriteColor = new Float32Array([
+                        glowColorParsed[0], glowColorParsed[1], glowColorParsed[2], coreOpacity
+                    ]);
+                    nebulaRenderer.drawSprite(
+                        nebula.x, nebula.y,
+                        coreSpriteSize, coreSpriteSize,
+                        c * 0.4, // Slight rotation variation
+                        coreSpriteColor,
+                        0.5, 0.5
+                    );
+                }
+            } else {
+                // Fallback for old nebulas without cloud blobs
+                const nebulaColor = ColorUtils.parseColor(nebula.color, 0.8);
+                nebulaRenderer.drawSprite(
+                    nebula.x, nebula.y,
+                    nebula.width, nebula.height,
+                    0,
+                    nebulaColor,
+                    0.5, 0.5
+                );
+            }
+        });
+        
+        nebulaRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
     nebulas.forEach(nebula => {
         ctx.save();
         ctx.translate(nebula.x, nebula.y);
@@ -1530,41 +2149,33 @@ function drawNebulas() {
         
         // Draw morphing cloud shape using multiple overlapping blobs
         if (nebula.cloudBlobs && nebula.cloudBlobs.length > 0) {
-            // Use composite operation for smooth blending
             ctx.globalCompositeOperation = 'screen';
             
-            // Draw each cloud blob with soft gradients
             nebula.cloudBlobs.forEach((blob, index) => {
-                // Create radial gradient for each blob
                 const blobGradient = ctx.createRadialGradient(
                     blob.x, blob.y, 0,
                     blob.x, blob.y, blob.radius
                 );
                 
-                // Vary opacity and color intensity based on blob position and index
                 const distFromCenter = Math.sqrt(blob.x * blob.x + blob.y * blob.y);
                 const normalizedDist = distFromCenter / (nebula.width / 2);
-                const opacity = (1 - normalizedDist * 0.5) * 0.8; // Fade out at edges
+                    const opacity = (1 - normalizedDist * 0.5) * 0.8;
                 
-                // Inner glow (brighter) - reduced color stops for performance
                 blobGradient.addColorStop(0, hslToRgba(nebula.glowColor, opacity * 0.9));
-                blobGradient.addColorStop(0.5, hslToRgba(nebula.color, opacity * 0.5)); // Combined middle stops
+                    blobGradient.addColorStop(0.5, hslToRgba(nebula.color, opacity * 0.5));
                 blobGradient.addColorStop(1, hslToRgba(nebula.color, 0));
                 
                 ctx.fillStyle = blobGradient;
-                ctx.shadowBlur = 10; // Reduced from 20 for performance
+                    ctx.shadowBlur = 10;
         ctx.shadowColor = nebula.glowColor;
                 
-                // Draw blob as soft circle
         ctx.beginPath();
                 ctx.arc(blob.x, blob.y, blob.radius, 0, Math.PI * 2);
         ctx.fill();
             });
             
-            // Draw additional smaller wisps for more detail (reduced for performance)
             ctx.globalAlpha = 0.3;
             nebula.cloudBlobs.forEach(blob => {
-                // Add smaller wisps around each main blob (reduced from 2 to 1 per blob)
                 const wispAngle = nebula.morphTime * 0.3 + blob.phase;
                 const wispDist = blob.radius * 0.6;
                 const wispX = blob.x + Math.cos(wispAngle) * wispDist;
@@ -1618,6 +2229,7 @@ function drawNebulas() {
         ctx.shadowBlur = 0;
         ctx.restore();
     });
+}
 }
 
 // Update enemies
@@ -1893,11 +2505,220 @@ function updateEnemies() {
                 cumulativeCredits += 5; // Track cumulative credits
             }
             
+            // Track if enemy was destroyed while being tractored
+            if (tractorBeam.active && tractorBeam.target === enemy) {
+                targetsDestroyedWhileTractored++;
+            }
+            
             // No powerups from enemies - only from asteroids
             return false;
         }
 
+        // Add smoke particles when damaged (in update, not draw)
+        const enemyHealthPercent = enemy.health / enemy.maxHealth;
+        if (enemyHealthPercent < 0.7 && Math.random() < 0.3) {
+            const smokeX = enemy.x + (Math.random() - 0.5) * enemy.width * 0.8;
+            const smokeY = enemy.y + (Math.random() - 0.5) * enemy.height * 0.8;
+            particles.push({
+                x: smokeX,
+                y: smokeY,
+                vx: (Math.random() - 0.5) * 0.5,
+                vy: (Math.random() - 0.5) * 0.5,
+                life: 30,
+                maxLife: 30,
+                size: 3 + Math.random() * 2,
+                color: `hsl(0, 0%, ${30 + Math.random() * 20}%)`, // Gray smoke
+                glow: false
+            });
+        }
+
         // Keep enemy on screen - only remove if destroyed
+        return true;
+    });
+}
+
+// Update bosses (similar to enemies but stronger)
+function updateBosses() {
+    bosses = bosses.filter(boss => {
+        // Similar AI to enemies but always targets player
+        const targetX = player.x;
+        const targetY = player.y;
+        
+        // Pursue player with circling behavior
+        const dx = targetX - boss.x;
+        const dy = targetY - boss.y;
+        const dist = Math.hypot(dx, dy);
+        
+        if (dist > 0) {
+            const pursuitForce = boss.pursuitSpeed || 0.8;
+            const minDistance = 100; // Slightly larger for boss
+            const maxDistance = 180;
+            const repulsionForce = 0.4;
+            const circlingForce = 0.3;
+            
+            let pursuitX = 0;
+            let pursuitY = 0;
+            let repulsionX = 0;
+            let repulsionY = 0;
+            let circlingX = 0;
+            let circlingY = 0;
+            
+            if (dist < minDistance) {
+                repulsionX = -(dx / dist) * repulsionForce * ((minDistance - dist) / minDistance);
+                repulsionY = -(dy / dist) * repulsionForce * ((minDistance - dist) / minDistance);
+            } else if (dist > maxDistance) {
+                pursuitX = (dx / dist) * pursuitForce;
+                pursuitY = (dy / dist) * pursuitForce;
+            } else {
+                const tangentX = -dy / dist;
+                const tangentY = dx / dist;
+                circlingX = tangentX * circlingForce * boss.circleDirection;
+                circlingY = tangentY * circlingForce * boss.circleDirection;
+                const distanceError = dist - (minDistance + maxDistance) / 2;
+                pursuitX = (dx / dist) * pursuitForce * 0.3 * (distanceError / maxDistance);
+                pursuitY = (dy / dist) * pursuitForce * 0.3 * (distanceError / maxDistance);
+            }
+            
+            boss.vx = pursuitX + repulsionX + circlingX;
+            boss.vy = pursuitY + repulsionY + circlingY;
+        }
+        
+        // Update position
+        boss.x += boss.vx;
+        boss.y += boss.vy;
+        
+        // Orient boss toward player
+        boss.targetRotation = Math.atan2(dx, -dy);
+        let angleDiff = boss.targetRotation - boss.rotation;
+        while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+        while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+        
+        const maxRotationSpeed = 0.08; // Slightly slower rotation for boss
+        if (Math.abs(angleDiff) > maxRotationSpeed) {
+            boss.rotation += Math.sign(angleDiff) * maxRotationSpeed;
+        } else {
+            boss.rotation = boss.targetRotation;
+        }
+        
+        // Keep boss on screen
+        const margin = 30;
+        if (boss.x < margin) {
+            boss.x = margin;
+            boss.vx = Math.abs(boss.vx) * 0.5;
+        } else if (boss.x > getCanvasWidth() - margin) {
+            boss.x = getCanvasWidth() - margin;
+            boss.vx = -Math.abs(boss.vx) * 0.5;
+        }
+        if (boss.y < margin) {
+            boss.y = margin;
+            boss.vy = Math.abs(boss.vy) * 0.5;
+        } else if (boss.y > getCanvasHeight() - margin) {
+            boss.y = getCanvasHeight() - margin;
+            boss.vy = -Math.abs(boss.vy) * 0.5;
+        }
+        
+        // Boss shooting
+        boss.shootCooldown--;
+        if (boss.shootCooldown <= 0 && dist > 0) {
+            boss.shootCooldown = 40 + Math.random() * 40; // Faster shooting
+            sounds.enemyShot();
+            
+            const frontX = boss.x + Math.sin(boss.rotation) * (boss.height / 2);
+            const frontY = boss.y - Math.cos(boss.rotation) * (boss.height / 2);
+            
+            bullets.push({
+                x: frontX,
+                y: frontY,
+                vx: (dx / dist) * 4, // Faster bullets
+                vy: (dy / dist) * 4,
+                damage: boss.damage,
+                color: '#ff0000',
+                size: 6, // Larger bullets
+                type: 'enemy',
+                glow: true
+            });
+        }
+        
+        // Check collision with player bullets
+        for (let i = 0; i < bullets.length; i++) {
+            const bullet = bullets[i];
+            if (bullet.type !== 'enemy' && checkCollision(boss, bullet)) {
+                boss.health -= bullet.damage;
+                bullets.splice(i, 1);
+                i--;
+            }
+        }
+        
+        // Check collision with player - ramming boss kills player instantly
+        if (checkCollision(boss, player)) {
+            player.health = 0; // Instant kill
+            gameOver();
+            sounds.enemyExplosion();
+            createExplosion(boss.x, boss.y, 50);
+            return false;
+        }
+        
+        // Check collision with cargo vessel
+        if (gameState.gameMode === 'mission' && cargoVessel && checkCollision(boss, cargoVessel)) {
+            cargoVessel.health -= boss.damage * 2;
+            sounds.enemyExplosion();
+            createExplosion(boss.x, boss.y, 50);
+            return false;
+        }
+        
+        // Check collision with allies
+        for (let i = 0; i < allies.length; i++) {
+            const ally = allies[i];
+            if (checkCollision(boss, ally)) {
+                ally.health -= boss.damage * 2; // Boss does more damage
+                sounds.enemyExplosion();
+                createExplosion(boss.x, boss.y, 50);
+                
+                // Check if ally is destroyed
+                if (ally.health <= 0) {
+                    createExplosion(ally.x, ally.y, 25);
+                    allies.splice(i, 1);
+                }
+            }
+        }
+        
+        // Boss defeated - drop token and award points
+        if (boss.health <= 0) {
+            sounds.enemyExplosion();
+            createBigExplosion(boss.x, boss.y, 80); // Bigger explosion
+            gameState.score += 500; // More points for boss
+            gameState.enemiesKilled++;
+            
+            // Award credits in normal mode
+            if (gameState.gameMode === 'normal') {
+                currency += 50; // More credits for boss
+                cumulativeCredits += 50;
+            }
+            
+            // Drop token (powerup) when defeated
+            spawnPowerup(boss.x, boss.y);
+            
+            return false;
+        }
+        
+        // Add smoke particles when damaged
+        const bossHealthPercent = boss.health / boss.maxHealth;
+        if (bossHealthPercent < 0.7 && Math.random() < 0.3) {
+            const smokeX = boss.x + (Math.random() - 0.5) * boss.width * 0.8;
+            const smokeY = boss.y + (Math.random() - 0.5) * boss.height * 0.8;
+            particles.push({
+                x: smokeX,
+                y: smokeY,
+                vx: (Math.random() - 0.5) * 0.5,
+                vy: (Math.random() - 0.5) * 0.5,
+                life: 30,
+                maxLife: 30,
+                size: 5 + Math.random() * 3, // Larger smoke
+                color: `hsl(0, 0%, ${30 + Math.random() * 20}%)`,
+                glow: false
+            });
+        }
+        
         return true;
     });
 }
@@ -1945,6 +2766,14 @@ function updateAsteroids() {
             if (gameState.gameMode === 'normal') {
                 currency += 2;
                 cumulativeCredits += 2; // Track cumulative credits
+            }
+            
+            // Track asteroid destruction for RL rewards
+            asteroidsDestroyedThisStep++;
+            
+            // Track if asteroid was destroyed while being tractored
+            if (tractorBeam.active && tractorBeam.target === asteroid) {
+                targetsDestroyedWhileTractored++;
             }
             
             // Drop upgrade powerup from destroyed asteroids (incentive to mine them)
@@ -2033,6 +2862,18 @@ function findNearestTractorTarget() {
         }
     });
     
+    // Check bosses (can be tractored)
+    bosses.forEach(boss => {
+        const dx = boss.x - frontX;
+        const dy = boss.y - frontY;
+        const dist = Math.hypot(dx, dy);
+        if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestTarget = boss;
+            targetType = 'boss';
+        }
+    });
+    
     return { target: nearestTarget, type: targetType };
 }
 
@@ -2045,6 +2886,7 @@ function activateTractorBeam() {
         tractorBeam.target = result.target;
         tractorBeam.targetType = result.type;
         tractorBeam.currentDuration = 0;
+        tractorBeamActivatedThisStep = true;  // Track activation for rewards
     }
 }
 
@@ -2059,6 +2901,1728 @@ function deactivateTractorBeam() {
         mobileTractorBeamBtn.classList.remove('active');
     }
 }
+
+// RL Agent / Autopilot Functions
+
+// Observation and action dimensions
+// Updated: 6 (player) + 15 (enemies) + 10 (asteroids) + 10 (enemy bullets) + 5 (weapons) + 2 (tractor) + 2 (score/level) + 4 (cargo) + 4 (crew) + 1 (upgrade pending) + 4 (powerups) = 63
+const OBS_DIM = 63;
+const NUM_ACTIONS = 20;  // 0-19 actions (11 movement/combat + 5 crew management + 4 upgrade selection)
+
+// Action space: 16 discrete actions
+const ACTIONS = {
+    NO_OP: 0,
+    MOVE_UP: 1,          // W or Arrow Up
+    MOVE_DOWN: 2,        // S or Arrow Down
+    MOVE_LEFT: 3,        // A or Arrow Left
+    MOVE_RIGHT: 4,       // D or Arrow Right
+    ROTATE_LEFT: 5,      // A (rotation)
+    ROTATE_RIGHT: 6,     // D (rotation)
+    SHOOT_PRIMARY: 7,    // Space or Mouse Click
+    SHOOT_MISSILE: 8,    // 1 key
+    SHOOT_LASER: 9,      // 2 key
+    ACTIVATE_TRACTOR: 10, // T key
+    // Crew management actions
+    ASSIGN_CREW_SHIELDS: 11,      // Assign crew to shields station
+    ASSIGN_CREW_ENGINEERING: 12,   // Assign crew to engineering station
+    ASSIGN_CREW_WEAPONS: 13,       // Assign crew to weapons station
+    ASSIGN_CREW_NAVIGATION: 14,    // Assign crew to navigation station
+    UNASSIGN_CREW: 15,             // Unassign crew (move to pool)
+    // Upgrade selection actions
+    SELECT_UPGRADE_HEALTH: 16,     // Select health upgrade
+    SELECT_UPGRADE_SHIELDS: 17,    // Select shields upgrade
+    SELECT_UPGRADE_ALLY: 18,       // Select player ally upgrade
+    SELECT_UPGRADE_CARGO_ALLY: 19  // Select cargo ally upgrade
+};
+
+// Extract game observation (normalized to [-1, 1] range)
+function getGameObservation() {
+    const obs = [];
+    
+    // Player state (normalized)
+    obs.push((player.x / getCanvasWidth()) * 2 - 1);  // x position [-1, 1]
+    obs.push((player.y / getCanvasHeight()) * 2 - 1); // y position [-1, 1]
+    obs.push(player.rotation / (2 * Math.PI));        // rotation [0, 1]
+    obs.push(player.health / player.maxHealth);       // health [0, 1]
+    obs.push(player.shields / player.maxShields);     // shields [0, 1]
+    obs.push(player.rotationSpeed);                   // rotation speed
+    
+    // Nearest enemies (top 5)
+    const nearestEnemies = getNearestObjects(enemies, 5);
+    for (let i = 0; i < 5; i++) {
+        if (nearestEnemies[i]) {
+            const enemy = nearestEnemies[i];
+            const dx = enemy.x - player.x;
+            const dy = enemy.y - player.y;
+            const dist = Math.hypot(dx, dy);
+            const angle = Math.atan2(dy, dx) / (2 * Math.PI); // normalized angle
+            obs.push(Math.tanh(dist / 500));  // distance (tanh for normalization)
+            obs.push(angle);
+            obs.push(enemy.health / 20);  // normalized enemy health
+        } else {
+            obs.push(1.0);  // no enemy (far away)
+            obs.push(0.0);
+            obs.push(0.0);
+        }
+    }
+    
+    // Nearest asteroids (top 5)
+    const nearestAsteroids = getNearestObjects(asteroids, 5);
+    for (let i = 0; i < 5; i++) {
+        if (nearestAsteroids[i]) {
+            const asteroid = nearestAsteroids[i];
+            const dx = asteroid.x - player.x;
+            const dy = asteroid.y - player.y;
+            const dist = Math.hypot(dx, dy);
+            const angle = Math.atan2(dy, dx) / (2 * Math.PI);
+            obs.push(Math.tanh(dist / 500));
+            obs.push(angle);
+        } else {
+            obs.push(1.0);
+            obs.push(0.0);
+        }
+    }
+    
+    // Weapon states
+    obs.push(weapons.primary.cooldown / weapons.primary.maxCooldown);
+    obs.push(weapons.missile.cooldown / weapons.missile.maxCooldown);
+    obs.push(weapons.missile.ammo / weapons.missile.maxAmmo);
+    obs.push(weapons.laser.cooldown / weapons.laser.maxCooldown);
+    obs.push(weapons.laser.ammo / weapons.laser.maxAmmo);
+    
+    // Tractor beam state
+    obs.push(tractorBeam.charge / tractorBeam.maxCharge);
+    obs.push(tractorBeam.active ? 1.0 : 0.0);
+    
+    // Score and level (normalized)
+    obs.push(Math.tanh(gameState.score / 1000));
+    obs.push(gameState.level / 10);
+    
+    // Nearest enemy bullets (top 5) - critical for avoiding damage
+    const enemyBullets = bullets.filter(b => b.type === 'enemy');
+    const nearestEnemyBullets = getNearestObjects(enemyBullets, 5);
+    for (let i = 0; i < 5; i++) {
+        if (nearestEnemyBullets[i]) {
+            const bullet = nearestEnemyBullets[i];
+            const dx = bullet.x - player.x;
+            const dy = bullet.y - player.y;
+            const dist = Math.hypot(dx, dy);
+            const angle = Math.atan2(dy, dx) / (2 * Math.PI);
+            obs.push(Math.tanh(dist / 500));  // distance
+            obs.push(angle);  // angle to bullet
+        } else {
+            obs.push(1.0);  // no bullet (far away)
+            obs.push(0.0);
+        }
+    }
+    
+    // Cargo vessel state (mission mode)
+    if (gameState.gameMode === 'mission' && cargoVessel) {
+        const dx = cargoVessel.x - player.x;
+        const dy = cargoVessel.y - player.y;
+        const dist = Math.hypot(dx, dy);
+        const angle = Math.atan2(dy, dx) / (2 * Math.PI);
+        obs.push(Math.tanh(dist / 500));  // distance to cargo vessel
+        obs.push(angle);  // angle to cargo vessel
+        obs.push(cargoVessel.health ? (cargoVessel.health / cargoVessel.maxHealth) : 1.0);  // cargo health (if exists)
+        obs.push(cargoVessel.direction || 0);  // cargo direction (-1 or 1)
+    } else {
+        obs.push(1.0);  // no cargo vessel
+        obs.push(0.0);
+        obs.push(0.0);
+        obs.push(0.0);
+    }
+    
+    // Crew allocation (normalized counts)
+    obs.push(crewAllocation.shields.length / 5);  // max 5 crew per station
+    obs.push(crewAllocation.engineering.length / 5);
+    obs.push(crewAllocation.weapons.length / 5);
+    obs.push(crewAllocation.navigation.length / 5);
+    
+    // Upgrade menu state (1.0 if upgrade menu is open, 0.0 otherwise)
+    const upgradeMenuOpen = !document.getElementById('upgradeMenu').classList.contains('hidden');
+    obs.push(upgradeMenuOpen ? 1.0 : 0.0);
+    
+    // Nearest powerups (top 2) - for collecting upgrade tokens
+    const nearestPowerups = getNearestObjects(powerups, 2);
+    for (let i = 0; i < 2; i++) {
+        if (nearestPowerups[i]) {
+            const powerup = nearestPowerups[i];
+            const dx = powerup.x - player.x;
+            const dy = powerup.y - player.y;
+            const dist = Math.hypot(dx, dy);
+            const angle = Math.atan2(dy, dx) / (2 * Math.PI);
+            obs.push(Math.tanh(dist / 500));  // distance
+            obs.push(angle);  // angle to powerup
+        } else {
+            obs.push(1.0);  // no powerup (far away)
+            obs.push(0.0);
+        }
+    }
+    
+    return obs;
+}
+
+// Helper: Get nearest objects sorted by distance
+function getNearestObjects(objects, count) {
+    if (!objects || objects.length === 0) {
+        return new Array(count).fill(null);
+    }
+    
+    const withDistances = objects.map(obj => ({
+        obj: obj,
+        dist: Math.hypot(obj.x - player.x, obj.y - player.y)
+    }));
+    
+    withDistances.sort((a, b) => a.dist - b.dist);
+    
+    const result = [];
+    for (let i = 0; i < count; i++) {
+        result.push(withDistances[i] ? withDistances[i].obj : null);
+    }
+    
+    return result;
+}
+
+
+// Apply agent action to game
+function applyAgentAction(action) {
+    // Clear previous input state
+    const prevKeys = {...keys};
+    const prevMouseButton = mouseButtonDown;
+    
+    // Reset action-specific keys
+    keys[' '] = false;
+    keys['1'] = false;
+    keys['2'] = false;
+    keys['t'] = false;
+    keys['T'] = false;
+    keys['w'] = false;
+    keys['s'] = false;
+    keys['a'] = false;
+    keys['d'] = false;
+    keys['arrowup'] = false;
+    keys['arrowdown'] = false;
+    keys['arrowleft'] = false;
+    keys['arrowright'] = false;
+    mouseButtonDown = false;
+    
+    // Apply action
+    switch(action) {
+        case ACTIONS.NO_OP:
+            // Do nothing
+            break;
+        case ACTIONS.MOVE_UP:
+            keys['w'] = true;
+            keys['arrowup'] = true;
+            break;
+        case ACTIONS.MOVE_DOWN:
+            keys['s'] = true;
+            keys['arrowdown'] = true;
+            break;
+        case ACTIONS.MOVE_LEFT:
+            keys['arrowleft'] = true;
+            break;
+        case ACTIONS.MOVE_RIGHT:
+            keys['arrowright'] = true;
+            break;
+        case ACTIONS.ROTATE_LEFT:
+            keys['a'] = true;
+            break;
+        case ACTIONS.ROTATE_RIGHT:
+            keys['d'] = true;
+            break;
+        case ACTIONS.SHOOT_PRIMARY:
+            keys[' '] = true;
+            mouseButtonDown = true;
+            break;
+        case ACTIONS.SHOOT_MISSILE:
+            keys['1'] = true;
+            break;
+        case ACTIONS.SHOOT_LASER:
+            keys['2'] = true;
+            break;
+        case ACTIONS.ACTIVATE_TRACTOR:
+            // Tractor beam is activated via function call, not key press
+            if (gameState.running && !gameState.paused) {
+                activateTractorBeam();
+            }
+            break;
+        case ACTIONS.ASSIGN_CREW_SHIELDS:
+            assignCrewToStationAgent('shields');
+            break;
+        case ACTIONS.ASSIGN_CREW_ENGINEERING:
+            assignCrewToStationAgent('engineering');
+            break;
+        case ACTIONS.ASSIGN_CREW_WEAPONS:
+            assignCrewToStationAgent('weapons');
+            break;
+        case ACTIONS.ASSIGN_CREW_NAVIGATION:
+            assignCrewToStationAgent('navigation');
+            break;
+        case ACTIONS.UNASSIGN_CREW:
+            unassignCrewAgent();
+            break;
+        case ACTIONS.SELECT_UPGRADE_HEALTH:
+            selectUpgradeAgent('health');
+            break;
+        case ACTIONS.SELECT_UPGRADE_SHIELDS:
+            selectUpgradeAgent('shields');
+            break;
+        case ACTIONS.SELECT_UPGRADE_ALLY:
+            selectUpgradeAgent('ally');
+            break;
+        case ACTIONS.SELECT_UPGRADE_CARGO_ALLY:
+            selectUpgradeAgent('cargoAlly');
+            break;
+    }
+}
+
+// Agent upgrade selection function
+function selectUpgradeAgent(upgradeKey) {
+    // Check if upgrade menu is open
+    const menu = document.getElementById('upgradeMenu');
+    if (menu && !menu.classList.contains('hidden')) {
+        // Apply the upgrade directly
+        applyUpgrade(upgradeKey);
+        menu.classList.add('hidden');
+        gameState.paused = false;
+    }
+}
+
+// Agent crew management functions
+function assignCrewToStationAgent(station) {
+    // Find an unassigned crew member (in pool)
+    const unassignedCrew = crewMembers.find(c => !c.station);
+    
+    if (unassignedCrew) {
+        // Assign unassigned crew to the station
+        assignCrewToStation(unassignedCrew.id, station, 'player');
+        return;
+    }
+    
+    // If no unassigned crew, find the station with most crew and move one
+    const stationCounts = {
+        shields: crewAllocation.shields.length,
+        engineering: crewAllocation.engineering.length,
+        weapons: crewAllocation.weapons.length,
+        navigation: crewAllocation.navigation.length
+    };
+    
+    // Find station with most crew (excluding target station)
+    let maxStation = null;
+    let maxCount = 0;
+    for (const [stat, count] of Object.entries(stationCounts)) {
+        if (stat !== station && count > maxCount) {
+            maxCount = count;
+            maxStation = stat;
+        }
+    }
+    
+    // Move one crew from max station to target station
+    if (maxStation && crewAllocation[maxStation].length > 0) {
+        const crewToMove = crewAllocation[maxStation][0];
+        assignCrewToStation(crewToMove.id, station, 'player');
+    }
+}
+
+function unassignCrewAgent() {
+    // Find the station with most crew and unassign one
+    const stationCounts = {
+        shields: crewAllocation.shields.length,
+        engineering: crewAllocation.engineering.length,
+        weapons: crewAllocation.weapons.length,
+        navigation: crewAllocation.navigation.length
+    };
+    
+    // Find station with most crew
+    let maxStation = null;
+    let maxCount = 0;
+    for (const [stat, count] of Object.entries(stationCounts)) {
+        if (count > maxCount) {
+            maxCount = count;
+            maxStation = stat;
+        }
+    }
+    
+    // Unassign one crew from that station
+    if (maxStation && crewAllocation[maxStation].length > 0) {
+        const crewToUnassign = crewAllocation[maxStation][0];
+        assignCrewToStation(crewToUnassign.id, null, 'player');
+    }
+}
+
+// Training state
+let lastObservation = null;
+let lastAction = null;
+let lastValue = null;
+let lastLogProb = null;
+let episodeStartScore = 0;
+let episodeStartTime = 0;
+let trainingUpdateCounter = 0;
+const TRAINING_UPDATE_FREQUENCY = 5;  // Update every 5 episodes (more frequent training)
+
+// Reward tracking for asteroid mining chain
+let asteroidsDestroyedThisStep = 0;
+let powerupsCollectedThisStep = 0;
+let upgradesSelectedThisStep = 0;
+let prevAsteroidsDestroyed = 0;
+let prevPowerupsCollected = 0;
+let prevUpgradesSelected = 0;
+
+// Tractor beam tracking
+let tractorBeamActivatedThisStep = false;
+let prevTractorBeamActive = false;
+let targetsDestroyedWhileTractored = 0;
+let prevTargetsDestroyedWhileTractored = 0;
+
+// Reward function
+function calculateReward(prevScore, prevHealth, prevShields, prevCargoHealth) {
+    let reward = 0;
+    
+    // Primary signal: direct score gain
+    const scoreDiff = gameState.score - prevScore;
+    reward += scoreDiff;
+    
+    // Survival bonus (staying alive per frame)
+    reward += 0.05;
+    
+    // Penalize taking hull or shield damage
+    const healthDiff = (player.health - prevHealth) / player.maxHealth;
+    reward += healthDiff * 25;  // Negative when damage taken
+    
+    const shieldDiff = (player.shields - prevShields) / player.maxShields;
+    reward += shieldDiff * 10;
+    
+    // Death penalty
+    if (player.health <= 0) {
+        reward -= 300;
+    }
+    
+    // Cargo ship protection rewards (mission mode only)
+    if (gameState.gameMode === 'mission' && cargoVessel) {
+        const currentCargoHealth = cargoVessel.health || cargoVessel.maxHealth;
+        
+        // Penalty for cargo ship taking damage
+        const cargoHealthDiff = (currentCargoHealth - prevCargoHealth) / cargoVessel.maxHealth;
+        reward += cargoHealthDiff * 30;  // Strong penalty for damage, reward for healing
+        
+        // Large penalty if cargo ship is destroyed
+        if (currentCargoHealth <= 0) {
+            reward -= 300;  // Very large penalty for cargo destruction
+        }
+        
+        // Proximity reward: small bonus for staying near cargo ship (within 300 pixels)
+        const distToCargo = Math.hypot(cargoVessel.x - player.x, cargoVessel.y - player.y);
+        if (distToCargo < 300) {
+            const proximityBonus = (1 - distToCargo / 300) * 0.5;  // Max 0.5 reward when very close
+            reward += proximityBonus;
+        }
+        
+        // Bonus for killing enemies near cargo ship
+        const enemiesKilled = gameState.enemiesKilled - (prevEnemiesKilled || 0);
+        if (enemiesKilled > 0 && distToCargo < 400) {
+            reward += enemiesKilled * 5;
+        }
+    }
+    
+    return reward;
+}
+
+// Autopilot step - get action from agent and apply it
+let autopilotInferencePending = false;
+let prevScore = 0;
+let prevHealth = 100;
+let prevShields = 50;
+let prevCargoHealth = 100;
+let prevEnemiesKilled = 0;
+
+async function autopilotStep() {
+    if (!rlAgent) {
+        // No agent loaded yet - autopilot disabled
+        autopilotEnabled = false;
+        updateAutopilotUI();
+        return;
+    }
+    
+    // Prevent multiple simultaneous inferences
+    if (autopilotInferencePending) {
+        return;
+    }
+    
+    // Allow autopilot to work even when paused (for upgrade selection)
+    // But skip if not running at all
+    if (!gameState.running) {
+        return;
+    }
+    
+    autopilotInferencePending = true;
+    
+    try {
+        // Get current observation
+        const observation = getGameObservation();
+        
+        // Get action from agent
+        let result;
+        if (rlAgent instanceof PPOAgent) {
+            // Small exploration chance keeps training progressing while mostly deterministic for a smooth autopilot
+            const exploreChance = 0.05;
+            const deterministic = !(Math.random() < exploreChance);
+            result = await rlAgent.getAction(observation, deterministic);
+            applyAgentAction(result.action);
+        } else if (rlAgent.getAction && typeof rlAgent.getAction === 'function') {
+            result = await rlAgent.getAction(observation, true);
+            applyAgentAction(result.action);
+        } else {
+            autopilotInferencePending = false;
+            return;
+        }
+        
+        // Store for training (always train when autopilot is on, but not when paused for upgrades)
+        // The model learns from the heuristic actions (behavioral cloning in real-time)
+        if (autopilotEnabled && lastObservation !== null && !gameState.paused) {
+            // Get current cargo health for reward calculation
+            const currentCargoHealth = (gameState.gameMode === 'mission' && cargoVessel) 
+                ? (cargoVessel.health || cargoVessel.maxHealth) 
+                : 100;
+            const reward = calculateReward(prevScore, prevHealth, prevShields, prevCargoHealth);
+            const done = player.health <= 0;
+            
+            // Store experience for training
+            // Note: We're using heuristic actions, so the model learns from expert demonstrations
+            // This is behavioral cloning in real-time - the model learns that heuristic actions are good
+            rlAgent.storeExperience(
+                lastObservation,
+                lastAction,
+                reward,
+                lastValue,
+                lastLogProb,
+                done
+            );
+        }
+        
+        // Update previous state (only if not paused, or if it's an upgrade action)
+        const isUpgradeAction = result.action >= ACTIONS.SELECT_UPGRADE_HEALTH && 
+                                result.action <= ACTIONS.SELECT_UPGRADE_CARGO_ALLY;
+        
+        if (!gameState.paused || isUpgradeAction) {
+            lastObservation = observation;
+            lastAction = result.action;
+            lastValue = result.value;
+            lastLogProb = result.logProb;
+            prevScore = gameState.score;
+            prevHealth = player.health;
+            prevShields = player.shields;
+            
+            // Update cargo health tracking
+            if (gameState.gameMode === 'mission' && cargoVessel) {
+                prevCargoHealth = cargoVessel.health || cargoVessel.maxHealth;
+            } else {
+                prevCargoHealth = 100;
+            }
+            
+            // Update previous reward tracking counters
+            prevAsteroidsDestroyed = asteroidsDestroyedThisStep;
+            prevPowerupsCollected = powerupsCollectedThisStep;
+            prevUpgradesSelected = upgradesSelectedThisStep;
+            prevEnemiesKilled = gameState.enemiesKilled;
+            prevTractorBeamActive = tractorBeam.active;
+            prevTargetsDestroyedWhileTractored = targetsDestroyedWhileTractored;
+        }
+        
+    } catch (error) {
+        console.error('Error in autopilot step:', error);
+    } finally {
+        autopilotInferencePending = false;
+    }
+}
+
+// Toggle autopilot
+async function toggleAutopilot() {
+    // Allow toggling even if paused (but not if game hasn't started)
+    if (!gameState.running) {
+        console.log('Cannot toggle autopilot: game not running');
+        return;
+    }
+    
+    console.log('Toggling autopilot, current state:', autopilotEnabled);
+    
+    autopilotEnabled = !autopilotEnabled;
+    
+    if (autopilotEnabled) {
+        // Try to load agent if not loaded (should already be loaded from init)
+        if (!rlAgent) {
+            console.log('Loading RL agent...');
+            await loadRLAgent();
+            // Load training stats if model was loaded
+            await loadTrainingStats();
+        }
+        
+        // Only start new episode if this is the first time enabling autopilot in this game session
+        // (i.e., if we don't have a previous observation, meaning we haven't started tracking yet)
+        if (rlAgent instanceof PPOAgent && lastObservation === null) {
+            startNewEpisode();
+        }
+        
+        // Disable player input
+        console.log('Autopilot: ON (Training enabled)');
+    } else {
+        // Re-enable player input
+        console.log('Autopilot: OFF');
+    }
+    
+    updateAutopilotUI();
+    updateTrainingUI();
+}
+
+// PPO Agent using TensorFlow.js
+class PPOAgent {
+    constructor(obsDim, actionDim, lr = 3e-4, gamma = 0.99, epsClip = 0.2) {
+        this.obsDim = obsDim;
+        this.actionDim = actionDim;
+        this.lr = lr;
+        this.gamma = gamma;
+        this.epsClip = epsClip;
+        
+        // Create policy network
+        this.policyNet = this.createPolicyNetwork();
+        this.optimizer = tf.train.adam(lr);
+        
+        // Experience buffer
+        this.buffer = {
+            observations: [],
+            actions: [],
+            rewards: [],
+            values: [],
+            logProbs: [],
+            dones: []
+        };
+        
+        this.maxBufferSize = 2048;
+    }
+    
+    createPolicyNetwork() {
+        // Create shared layers
+        const input = tf.input({shape: [this.obsDim]});
+        
+        let x = tf.layers.dense({
+            units: 128,
+            activation: 'relu',
+            kernelInitializer: 'glorotUniform'
+        }).apply(input);
+        x = tf.layers.layerNormalization().apply(x);
+        
+        x = tf.layers.dense({
+            units: 128,
+            activation: 'relu',
+            kernelInitializer: 'glorotUniform'
+        }).apply(x);
+        x = tf.layers.layerNormalization().apply(x);
+        
+        // Policy head (action logits)
+        const policyOut = tf.layers.dense({
+            units: this.actionDim,
+            activation: 'linear',
+            kernelInitializer: 'glorotUniform',
+            name: 'policy_head'
+        }).apply(x);
+        
+        // Value head
+        const valueOut = tf.layers.dense({
+            units: 1,
+            activation: 'linear',
+            kernelInitializer: 'glorotUniform',
+            name: 'value_head'
+        }).apply(x);
+        
+        return tf.model({inputs: input, outputs: [policyOut, valueOut]});
+    }
+    
+    // Heuristic policy: maps observations to reasonable actions
+    // This gives the agent a base understanding before RL training
+    getHeuristicAction(obs) {
+        // Observation indices (from getGameObservation):
+        // 0-5: Player state (x, y, rotation, health, shields, rotationSpeed)
+        // 6-20: Nearest enemies (5 enemies * 3 values: dist, angle, health)
+        // 21-30: Nearest asteroids (5 asteroids * 2 values: dist, angle)
+        // 31-35: Weapon states (primary cooldown, missile cooldown/ammo, laser cooldown/ammo)
+        // 36-37: Tractor beam (charge, active)
+        // 38-39: Score and level
+        // 40-49: Enemy bullets (5 bullets * 2 values: dist, angle)
+        // 50-53: Cargo vessel (dist, angle, health, direction) - only in mission mode
+        // 54-57: Crew allocation (4 stations)
+        // 58: Upgrade menu open
+        // 59-62: Nearest powerups (2 powerups * 2 values: dist, angle)
+        
+        const playerHealth = obs[3];
+        const playerShields = obs[4];
+        const playerXNorm = obs[0]; // [-1, 1]
+        const playerYNorm = obs[1]; // [-1, 1]
+        
+        // Extract nearest enemy info
+        const nearestEnemyDist = obs[6];  // Normalized distance (0-1, where 1 = far)
+        const nearestEnemyAngle = obs[7] * (2 * Math.PI);
+        const nearestEnemyHealth = obs[8];
+        const hasEnemy = nearestEnemyDist < 0.99;  // Enemy exists (not placeholder)
+        
+        // Extract nearest enemy bullet
+        const nearestBulletDist = obs[40];
+        const nearestBulletAngle = obs[41] * (2 * Math.PI);
+        
+        // Extract nearest asteroid
+        const nearestAsteroidDist = obs[21];
+        const nearestAsteroidAngle = obs[22] * (2 * Math.PI);
+        const hasAsteroid = nearestAsteroidDist < 0.99;  // Asteroid exists (not placeholder)
+        
+        // Extract nearest powerup (upgrade token)
+        const nearestPowerupDist = obs[59];
+        const nearestPowerupAngle = obs[60] * (2 * Math.PI);
+        const hasPowerup = nearestPowerupDist < 0.99;  // Powerup exists (not placeholder)
+        
+        // Weapon states
+        const primaryReady = obs[31] < 0.1;  // Cooldown normalized, < 0.1 = ready
+        const missileReady = obs[32] < 0.1 && obs[33] > 0;  // Cooldown ready and has ammo
+        const laserReady = obs[34] < 0.1 && obs[35] > 0;  // Cooldown ready and has ammo
+        
+        // Tractor beam state
+        const tractorCharge = obs[36];  // Normalized charge [0, 1]
+        const tractorActive = obs[37] > 0.5;  // Active or not
+        const tractorReady = tractorCharge > 0.3 && !tractorActive;  // Has charge and not active
+        
+        // Cargo vessel info (if in mission mode)
+        const cargoDist = obs[50];
+        const cargoAngle = obs[51] * (2 * Math.PI);
+        const cargoHealth = obs[52];
+        const hasCargo = cargoDist < 0.99;  // Not the "no cargo" placeholder value
+        
+        // Crew allocation (even spread across all systems)
+        const shieldsCrew = obs[54];
+        const engineeringCrew = obs[55];
+        const weaponsCrew = obs[56];
+        const navigationCrew = obs[57];
+        const totalCrew = shieldsCrew + engineeringCrew + weaponsCrew + navigationCrew;
+        const targetCrewPerStation = totalCrew / 4;  // Even distribution
+
+        // Upgrade menu state
+        const upgradeMenuOpen = obs[58] > 0.5;
+        
+        // Action priorities based on simple base rules
+        const actionScores = new Array(this.actionDim).fill(0);
+        
+        const hasImmediateThreat = nearestBulletDist < 0.3 || (hasAsteroid && nearestAsteroidDist < 0.15);
+        const hasTarget = (hasEnemy && nearestEnemyDist < 0.6) || (hasAsteroid && nearestAsteroidDist < 0.5) || (hasPowerup && nearestPowerupDist < 0.5);
+        
+        // Light patrol drift only when absolutely nothing is happening
+        if (!hasImmediateThreat && !hasTarget) {
+            actionScores[ACTIONS.MOVE_UP] += 0.2;
+        }
+        
+        // Boundary avoidance: steer back toward center when near edges
+        if (playerXNorm < -0.75) {
+            actionScores[ACTIONS.MOVE_RIGHT] += 4;
+        } else if (playerXNorm > 0.75) {
+            actionScores[ACTIONS.MOVE_LEFT] += 4;
+        }
+        if (playerYNorm < -0.75) {
+            actionScores[ACTIONS.MOVE_DOWN] += 4;
+        } else if (playerYNorm > 0.75) {
+            actionScores[ACTIONS.MOVE_UP] += 4;
+        }
+        
+        // RULE 1: Avoid enemy bullets (CRITICAL - highest priority)
+        if (nearestBulletDist < 0.3) {
+            const urgency = 1.0 - (nearestBulletDist / 0.3);
+            // Move perpendicular to bullet
+            if (Math.abs(nearestBulletAngle) < 0.3) {
+                actionScores[ACTIONS.MOVE_LEFT] += 8 * urgency;
+                actionScores[ACTIONS.MOVE_RIGHT] += 8 * urgency;
+            }
+            if (nearestBulletAngle > 0.2 && nearestBulletAngle < 0.8) {
+                actionScores[ACTIONS.MOVE_DOWN] += 8 * urgency;
+            }
+            if (nearestBulletAngle < -0.2 && nearestBulletAngle > -0.8) {
+                actionScores[ACTIONS.MOVE_UP] += 8 * urgency;
+            }
+        }
+        
+        // RULE 2: Avoid asteroid collisions (CRITICAL)
+        if (hasAsteroid && nearestAsteroidDist < 0.15) {
+            // Too close - move away
+            if (nearestAsteroidAngle > 0) {
+                actionScores[ACTIONS.MOVE_LEFT] += 10;
+            } else {
+                actionScores[ACTIONS.MOVE_RIGHT] += 10;
+            }
+            if (Math.abs(nearestAsteroidAngle) < 0.6) {
+                actionScores[ACTIONS.MOVE_UP] += 8;
+            }
+        }
+        
+        // RULE 3: Navigate and orientate toward enemies, then fire/tractor
+        if (hasEnemy && nearestEnemyDist < 0.6) {
+            const enemyAngleAbs = Math.abs(nearestEnemyAngle);
+            
+            // Rotate toward enemy (very high priority)
+            if (enemyAngleAbs > 0.05) {
+                const rotateScore = enemyAngleAbs > 0.3 ? 8 : 5;
+                if (nearestEnemyAngle > 0) {
+                    actionScores[ACTIONS.ROTATE_RIGHT] += rotateScore;
+                } else {
+                    actionScores[ACTIONS.ROTATE_LEFT] += rotateScore;
+                }
+            }
+            
+            // Move toward enemy only if too far away or drifting
+            if (nearestEnemyDist > 0.35) {
+                if (nearestEnemyAngle > 0.15) {
+                    actionScores[ACTIONS.MOVE_RIGHT] += 1.5;
+                } else if (nearestEnemyAngle < -0.15) {
+                    actionScores[ACTIONS.MOVE_LEFT] += 1.5;
+                }
+                // Nudge forward/back based on vertical angle
+                if (nearestEnemyAngle > 0.35) {
+                    actionScores[ACTIONS.MOVE_DOWN] += 1;
+                } else if (nearestEnemyAngle < -0.35) {
+                    actionScores[ACTIONS.MOVE_UP] += 1;
+                }
+            }
+            
+            // Fire only when tightly aligned
+            if (enemyAngleAbs < 0.12 && primaryReady) {
+                actionScores[ACTIONS.SHOOT_PRIMARY] += 7;
+            }
+            
+            // Tractor when ready and aligned
+            if (tractorReady && enemyAngleAbs < 0.15 && nearestEnemyDist > 0.3 && nearestEnemyDist < 0.5) {
+                actionScores[ACTIONS.ACTIVATE_TRACTOR] += 4;
+            }
+        }
+        
+        // RULE 4: Navigate and orientate toward asteroids, then tractor/fire
+        if (hasAsteroid && nearestAsteroidDist > 0.15 && nearestAsteroidDist < 0.5) {
+            const asteroidAngleAbs = Math.abs(nearestAsteroidAngle);
+            
+            // Move toward asteroid to get in range (always do this when asteroid is present and safe)
+            if (nearestAsteroidDist > 0.25) {  // Safe distance
+                if (nearestAsteroidAngle > 0.1) {
+                    actionScores[ACTIONS.MOVE_RIGHT] += 2;  // Move toward asteroid
+                } else if (nearestAsteroidAngle < -0.1) {
+                    actionScores[ACTIONS.MOVE_LEFT] += 2;
+                }
+                if (Math.abs(nearestAsteroidAngle) < 0.5) {
+                    if (nearestAsteroidAngle > 0.25) {
+                        actionScores[ACTIONS.MOVE_DOWN] += 2;
+                    } else if (nearestAsteroidAngle < -0.25) {
+                        actionScores[ACTIONS.MOVE_UP] += 2;
+                    }
+                }
+            }
+            
+            // Rotate toward asteroid
+            if (asteroidAngleAbs > 0.1) {
+                if (nearestAsteroidAngle > 0) {
+                    actionScores[ACTIONS.ROTATE_RIGHT] += 2;
+                } else {
+                    actionScores[ACTIONS.ROTATE_LEFT] += 2;
+                }
+            }
+            
+            // Tractor when ready and aligned (preferred for asteroids)
+            if (tractorReady && asteroidAngleAbs < 0.2 && nearestAsteroidDist > 0.2 && nearestAsteroidDist < 0.4) {
+                actionScores[ACTIONS.ACTIVATE_TRACTOR] += 5;
+            }
+            
+            // Fire when aligned (if tractor not ready)
+            if (!tractorActive && asteroidAngleAbs < 0.2 && primaryReady) {
+                actionScores[ACTIONS.SHOOT_PRIMARY] += 3;
+            }
+        }
+        
+        // RULE 5: Collect powerups
+        if (hasPowerup && nearestPowerupDist < 0.5) {
+            // Move toward powerup
+            if (nearestPowerupAngle > 0.1) {
+                actionScores[ACTIONS.MOVE_RIGHT] += 4;
+            } else if (nearestPowerupAngle < -0.1) {
+                actionScores[ACTIONS.MOVE_LEFT] += 4;
+            }
+            if (Math.abs(nearestPowerupAngle) < 0.5) {
+                if (nearestPowerupAngle > 0.25) {
+                    actionScores[ACTIONS.MOVE_DOWN] += 3;
+                } else if (nearestPowerupAngle < -0.25) {
+                    actionScores[ACTIONS.MOVE_UP] += 3;
+                }
+            }
+        }
+        
+        // RULE 6: Crew allocation - even spread across all systems
+        if (totalCrew > 0) {
+            // Assign crew to stations that are below the target (even distribution)
+            if (shieldsCrew < targetCrewPerStation - 0.1) {
+                actionScores[ACTIONS.ASSIGN_CREW_SHIELDS] += 1;
+            }
+            if (engineeringCrew < targetCrewPerStation - 0.1) {
+                actionScores[ACTIONS.ASSIGN_CREW_ENGINEERING] += 1;
+            }
+            if (weaponsCrew < targetCrewPerStation - 0.1) {
+                actionScores[ACTIONS.ASSIGN_CREW_WEAPONS] += 1;
+            }
+            if (navigationCrew < targetCrewPerStation - 0.1) {
+                actionScores[ACTIONS.ASSIGN_CREW_NAVIGATION] += 1;
+            }
+        }
+        
+        // RULE 7: Select upgrade when menu opens
+        if (upgradeMenuOpen) {
+            // Simple default: always pick health (RL can learn better choices)
+            actionScores[ACTIONS.SELECT_UPGRADE_HEALTH] += 5;
+            
+            // Suppress other actions when upgrade menu is open
+            for (let i = 0; i < actionScores.length; i++) {
+                if (i < ACTIONS.SELECT_UPGRADE_HEALTH || i > ACTIONS.SELECT_UPGRADE_CARGO_ALLY) {
+                    actionScores[i] *= 0.1;
+                }
+            }
+        }
+        
+        // Add minimal random noise (very small for consistent behavior)
+        for (let i = 0; i < actionScores.length; i++) {
+            actionScores[i] += (Math.random() - 0.5) * 0.02;  // Very small noise for consistency
+        }
+        
+        // Return action with highest score
+        let bestAction = 0;
+        let bestScore = actionScores[0];
+        for (let i = 1; i < actionScores.length; i++) {
+            if (actionScores[i] > bestScore) {
+                bestScore = actionScores[i];
+                bestAction = i;
+            }
+        }
+        
+        // Debug: Log action selection occasionally
+        if (Math.random() < 0.05) {  // 5% of the time
+            console.log(`Heuristic: bestAction=${bestAction}, bestScore=${bestScore.toFixed(2)}, MOVE_UP=${actionScores[ACTIONS.MOVE_UP].toFixed(2)}, MOVE_RIGHT=${actionScores[ACTIONS.MOVE_RIGHT].toFixed(2)}, ROTATE_LEFT=${actionScores[ACTIONS.ROTATE_LEFT].toFixed(2)}`);
+        }
+        
+        return bestAction;
+    }
+    
+    // Pre-train the network using heuristic policy (behavioral cloning)
+    async preTrainWithHeuristic(numSamples = 500) {
+        console.log(`Pre-training agent with heuristic policy (${numSamples} samples)...`);
+        
+        const observations = [];
+        const actions = [];
+        
+        // Generate synthetic observations and corresponding heuristic actions
+        for (let i = 0; i < numSamples; i++) {
+            // Generate random but realistic observations
+            const obs = this.generateSyntheticObservation();
+            const action = this.getHeuristicAction(obs);
+            
+            observations.push(obs);
+            actions.push(action);
+        }
+        
+        // Convert to tensors
+        const obsTensor = tf.tensor2d(observations);
+        const actionTensor = tf.tensor1d(actions, 'int32');
+        
+        // Create one-hot encoded actions for supervised learning
+        const actionOneHot = tf.oneHot(actionTensor, this.actionDim);
+        
+        // Train policy head using supervised learning
+        const optimizer = tf.train.adam(0.001);  // Higher learning rate for pre-training
+        
+        for (let epoch = 0; epoch < 10; epoch++) {
+            let totalLoss = 0;
+            
+            // Mini-batch training
+            const batchSize = 32;
+            for (let i = 0; i < numSamples; i += batchSize) {
+                const batchObs = obsTensor.slice([i, 0], [Math.min(batchSize, numSamples - i), this.obsDim]);
+                const batchActions = actionOneHot.slice([i, 0], [Math.min(batchSize, numSamples - i), this.actionDim]);
+                
+                const loss = optimizer.minimize(() => {
+                    const [predLogits, _] = this.policyNet.apply(batchObs);
+                    // Use logits directly - softmaxCrossEntropy expects logits, not probabilities
+                    const loss = tf.losses.softmaxCrossEntropy(batchActions, predLogits);
+                    return loss;
+                }, true);
+                
+                if (loss) {
+                    const lossValue = await loss.data();
+                    totalLoss += lossValue[0];  // loss.data() returns an array
+                    loss.dispose();
+                }
+                
+                batchObs.dispose();
+                batchActions.dispose();
+            }
+            
+            if (epoch % 2 === 0) {
+                const batchCount = Math.ceil(numSamples / batchSize);
+                const avgLoss = totalLoss / batchCount;
+                console.log(`  Pre-training epoch ${epoch + 1}/10, loss: ${avgLoss.toFixed(4)}`);
+            }
+        }
+        
+        // Cleanup
+        obsTensor.dispose();
+        actionTensor.dispose();
+        actionOneHot.dispose();
+        
+        // Test that the network learned something
+        const testObs = this.generateSyntheticObservation();
+        const testObsTensor = tf.tensor2d([testObs]);
+        const [testLogits, _] = this.policyNet.predict(testObsTensor);
+        const testLogitsData = await testLogits.data();
+        const heuristicAction = this.getHeuristicAction(testObs);
+        const networkAction = argmax(Array.from(testLogitsData));
+        
+        console.log(`  Test: Heuristic action=${heuristicAction}, Network action=${networkAction}, Match=${heuristicAction === networkAction}`);
+        
+        testObsTensor.dispose();
+        testLogits.dispose();
+        
+        console.log('Pre-training complete! Agent now has base understanding of game mechanics.');
+    }
+    
+    // Generate synthetic but realistic observations for pre-training
+    generateSyntheticObservation() {
+        const obs = new Array(this.obsDim).fill(0);
+        
+        // Player state (0-5)
+        obs[0] = (Math.random() - 0.5) * 0.8;  // x position
+        obs[1] = (Math.random() - 0.5) * 0.8;  // y position
+        obs[2] = Math.random();  // rotation
+        obs[3] = Math.random();  // health
+        obs[4] = Math.random();  // shields
+        obs[5] = 0.1 + Math.random() * 0.1;  // rotation speed
+        
+        // Enemies (6-20): Sometimes have enemies, sometimes not
+        for (let i = 0; i < 5; i++) {
+            if (Math.random() < 0.7) {  // 70% chance of enemy
+                obs[6 + i * 3] = Math.random() * 0.8;  // distance
+                obs[7 + i * 3] = (Math.random() - 0.5) * 2;  // angle
+                obs[8 + i * 3] = Math.random();  // health
+            } else {
+                obs[6 + i * 3] = 1.0;  // far away
+                obs[7 + i * 3] = 0.0;
+                obs[8 + i * 3] = 0.0;
+            }
+        }
+        
+        // Asteroids (21-30)
+        for (let i = 0; i < 5; i++) {
+            if (Math.random() < 0.5) {
+                obs[21 + i * 2] = Math.random() * 0.7;
+                obs[22 + i * 2] = (Math.random() - 0.5) * 2;
+            } else {
+                obs[21 + i * 2] = 1.0;
+                obs[22 + i * 2] = 0.0;
+            }
+        }
+        
+        // Weapons (31-35)
+        obs[31] = Math.random();  // primary cooldown
+        obs[32] = Math.random();  // missile cooldown
+        obs[33] = Math.random();  // missile ammo
+        obs[34] = Math.random();  // laser cooldown
+        obs[35] = Math.random();  // laser ammo
+        
+        // Tractor beam (36-37)
+        obs[36] = Math.random();  // charge
+        obs[37] = Math.random() < 0.1 ? 1.0 : 0.0;  // active
+        
+        // Score and level (38-39)
+        obs[38] = Math.random() * 0.5;
+        obs[39] = Math.random() * 0.3;
+        
+        // Enemy bullets (40-49)
+        for (let i = 0; i < 5; i++) {
+            if (Math.random() < 0.3) {  // 30% chance of bullet
+                obs[40 + i * 2] = Math.random() * 0.5;
+                obs[41 + i * 2] = (Math.random() - 0.5) * 2;
+            } else {
+                obs[40 + i * 2] = 1.0;
+                obs[41 + i * 2] = 0.0;
+            }
+        }
+        
+        // Cargo vessel (50-53): Sometimes in mission mode
+        if (Math.random() < 0.5) {  // 50% chance of cargo
+            obs[50] = Math.random() * 0.6;
+            obs[51] = (Math.random() - 0.5) * 2;
+            obs[52] = 0.5 + Math.random() * 0.5;  // health usually good
+            obs[53] = Math.random() < 0.5 ? -1 : 1;
+        } else {
+            obs[50] = 1.0;
+            obs[51] = 0.0;
+            obs[52] = 0.0;
+            obs[53] = 0.0;
+        }
+        
+        // Crew allocation (54-57)
+        obs[54] = Math.random();
+        obs[55] = Math.random();
+        obs[56] = Math.random();
+        obs[57] = Math.random();
+        
+        // Upgrade menu (58)
+        obs[58] = Math.random() < 0.1 ? 1.0 : 0.0;  // 10% chance open
+        
+        return obs;
+    }
+    
+    async getAction(obs, deterministic = false) {
+        const obsTensor = tf.tensor2d([obs]);
+        
+        const [actionLogits, value] = this.policyNet.predict(obsTensor);
+        const logits = await actionLogits.data();
+        const val = await value.data();
+        
+        obsTensor.dispose();
+        actionLogits.dispose();
+        value.dispose();
+        
+        let action;
+        let logProb;
+        
+        if (deterministic) {
+            // Greedy action
+            action = argmax(logits);
+            logProb = Math.log(softmaxSingle(logits, action));
+        } else {
+            // Sample from policy
+            const probs = softmax(Array.from(logits));
+            action = sampleFromDistribution(probs);
+            logProb = Math.log(probs[action]);
+        }
+        
+        return {
+            action: action,
+            logProb: logProb,
+            value: val[0]
+        };
+    }
+    
+    storeExperience(obs, action, reward, value, logProb, done) {
+        this.buffer.observations.push(obs);
+        this.buffer.actions.push(action);
+        this.buffer.rewards.push(reward);
+        this.buffer.values.push(value);
+        this.buffer.logProbs.push(logProb);
+        this.buffer.dones.push(done);
+        
+        // Limit buffer size
+        if (this.buffer.observations.length > this.maxBufferSize) {
+            this.buffer.observations.shift();
+            this.buffer.actions.shift();
+            this.buffer.rewards.shift();
+            this.buffer.values.shift();
+            this.buffer.logProbs.shift();
+            this.buffer.dones.shift();
+        }
+    }
+    
+    async loadModel(savedData) {
+        try {
+            // Reconstruct weights from saved data
+            const weights = savedData.weights.map(w => {
+                return tf.tensor(w.data, w.shape, w.dtype);
+            });
+            
+            // Verify weight count matches
+            const modelWeights = this.policyNet.getWeights();
+            if (weights.length !== modelWeights.length) {
+                console.error(`Weight count mismatch: loaded ${weights.length}, model expects ${modelWeights.length}`);
+                modelWeights.forEach(w => w.dispose());
+                weights.forEach(w => w.dispose());
+                return;
+            }
+            
+            // Set weights on the model
+            this.policyNet.setWeights(weights);
+            
+            // Dispose temporary tensors
+            weights.forEach(w => w.dispose());
+            modelWeights.forEach(w => w.dispose());
+            
+            const source = savedData.pretrained ? 'pre-trained model' : 'saved model';
+            console.log(`✅ Model weights loaded successfully from ${source} (${weights.length} layers)`);
+            
+            // Test the loaded model with a sample observation to verify it's working
+            if (savedData.pretrained) {
+                const testObs = new Array(this.obsDim).fill(0);
+                testObs[3] = 0.8; // health
+                testObs[4] = 0.7; // shields
+                testObs[6] = 0.3; // enemy nearby
+                testObs[31] = 0.0; // primary ready
+                const testResult = await this.getAction(testObs, true);
+                const heuristicAction = this.getHeuristicAction(testObs);
+                const match = testResult.action === heuristicAction ? '✓' : '✗';
+                console.log(`   Model test: Action=${testResult.action}, Heuristic=${heuristicAction} ${match}`);
+            }
+        } catch (error) {
+            console.error('Failed to load model weights:', error);
+            throw error;
+        }
+    }
+    
+    async update(epochs = 4) {
+        if (this.buffer.observations.length < 32) {
+            return { policyLoss: 0, valueLoss: 0, entropy: 0 };
+        }
+        
+        // Compute returns and advantages
+        const returns = this.computeReturns();
+        const advantages = this.computeAdvantages(returns);
+        
+        // Normalize advantages
+        const advMean = advantages.reduce((a, b) => a + b, 0) / advantages.length;
+        const advStd = Math.sqrt(advantages.reduce((sum, a) => sum + Math.pow(a - advMean, 2), 0) / advantages.length);
+        const normalizedAdvantages = advantages.map(a => (a - advMean) / (advStd + 1e-8));
+        
+        // Convert to tensors
+        const obsTensor = tf.tensor2d(this.buffer.observations);
+        const actionTensor = tf.tensor1d(this.buffer.actions, 'int32');
+        const returnTensor = tf.tensor1d(returns);
+        const advantageTensor = tf.tensor1d(normalizedAdvantages);
+        const oldLogProbTensor = tf.tensor1d(this.buffer.logProbs);
+        
+        let totalPolicyLoss = 0;
+        let totalValueLoss = 0;
+        let totalEntropy = 0;
+        
+        // Training epochs
+        for (let epoch = 0; epoch < epochs; epoch++) {
+            const [actionLogits, values] = this.policyNet.predict(obsTensor);
+            
+            // Compute new log probabilities
+            const logProbs = tf.log(tf.softmax(actionLogits));
+            const actionLogProbs = tf.sum(tf.mul(logProbs, tf.oneHot(actionTensor, this.actionDim)), 1);
+            
+            // Compute entropy
+            const probs = tf.softmax(actionLogits);
+            const entropy = tf.neg(tf.sum(tf.mul(logProbs, probs), 1));
+            const avgEntropy = await entropy.mean().data();
+            totalEntropy += avgEntropy[0];
+            
+            // Compute policy loss (PPO clipped objective)
+            const ratio = tf.exp(tf.sub(actionLogProbs, oldLogProbTensor));
+            const surr1 = tf.mul(ratio, advantageTensor);
+            const surr2 = tf.mul(tf.clipByValue(ratio, 1 - this.epsClip, 1 + this.epsClip), advantageTensor);
+            const policyLoss = tf.neg(tf.minimum(surr1, surr2));
+            const avgPolicyLoss = await policyLoss.mean().data();
+            totalPolicyLoss += avgPolicyLoss[0];
+            
+            // Compute value loss
+            const valueLoss = tf.losses.meanSquaredError(returnTensor, tf.squeeze(values));
+            const avgValueLoss = await valueLoss.data();
+            totalValueLoss += avgValueLoss[0];
+            
+            // Total loss
+            const totalLoss = tf.add(policyLoss, tf.mul(valueLoss, 0.5));
+            
+            // Update
+            const loss = await totalLoss.mean().data();
+            this.optimizer.minimize(() => totalLoss.mean());
+            
+            // Cleanup
+            actionLogits.dispose();
+            values.dispose();
+            logProbs.dispose();
+            actionLogProbs.dispose();
+            entropy.dispose();
+            ratio.dispose();
+            surr1.dispose();
+            surr2.dispose();
+            policyLoss.dispose();
+            valueLoss.dispose();
+            totalLoss.dispose();
+        }
+        
+        // Cleanup
+        obsTensor.dispose();
+        actionTensor.dispose();
+        returnTensor.dispose();
+        advantageTensor.dispose();
+        oldLogProbTensor.dispose();
+        
+        // Clear buffer
+        this.buffer = {
+            observations: [],
+            actions: [],
+            rewards: [],
+            values: [],
+            logProbs: [],
+            dones: []
+        };
+        
+        return {
+            policyLoss: totalPolicyLoss / epochs,
+            valueLoss: totalValueLoss / epochs,
+            entropy: totalEntropy / epochs
+        };
+    }
+    
+    computeReturns() {
+        const returns = [];
+        let nextValue = 0;
+        
+        for (let i = this.buffer.rewards.length - 1; i >= 0; i--) {
+            if (this.buffer.dones[i]) {
+                nextValue = 0;
+            }
+            nextValue = this.buffer.rewards[i] + this.gamma * nextValue;
+            returns.unshift(nextValue);
+        }
+        
+        return returns;
+    }
+    
+    computeAdvantages(returns) {
+        const advantages = [];
+        for (let i = 0; i < returns.length; i++) {
+            advantages.push(returns[i] - this.buffer.values[i]);
+        }
+        return advantages;
+    }
+}
+
+// Helper functions
+function argmax(arr) {
+    let maxIdx = 0;
+    let maxVal = arr[0];
+    for (let i = 1; i < arr.length; i++) {
+        if (arr[i] > maxVal) {
+            maxVal = arr[i];
+            maxIdx = i;
+        }
+    }
+    return maxIdx;
+}
+
+function softmaxSingle(logits, idx) {
+    const max = Math.max(...logits);
+    const exp = logits.map(x => Math.exp(x - max));
+    const sum = exp.reduce((a, b) => a + b, 0);
+    return exp[idx] / sum;
+}
+
+// Load pre-trained model from JSON file (deployed with game)
+async function loadPretrainedModel() {
+    try {
+        const response = await fetch('pretrained_model.json');
+        if (!response.ok) {
+            console.warn('Pre-trained model file not found');
+            return null;
+        }
+        const data = await response.json();
+        console.log('✅ Pre-trained model loaded from file');
+        return data;
+    } catch (error) {
+        console.warn('Could not load pre-trained model:', error);
+        return null;
+    }
+}
+
+// Load RL agent (TensorFlow.js PPO)
+async function loadRLAgent() {
+    try {
+        // Check if TensorFlow.js is available
+        if (typeof tf === 'undefined') {
+            console.warn('TensorFlow.js not loaded, using placeholder agent');
+            loadPlaceholderAgent();
+            return;
+        }
+        
+        // 1. First, try to load pre-trained model (deployed with game)
+        console.log('Attempting to load pre-trained model...');
+        const pretrainedModel = await loadPretrainedModel();
+        if (pretrainedModel) {
+            console.log(`Pre-trained model found! Weights: ${pretrainedModel.weights.length} layers`);
+            rlAgent = new PPOAgent(OBS_DIM, NUM_ACTIONS);
+            await rlAgent.loadModel(pretrainedModel);
+            console.log('✅ Agent starting with pre-trained base knowledge');
+            return;
+        } else {
+            console.warn('⚠️ Pre-trained model not found - will try IndexedDB or create new model');
+        }
+        
+        // 2. If pre-trained not found, try saved model from IndexedDB (user's learned model)
+        const savedModel = await loadModelFromStorage();
+        if (savedModel) {
+            rlAgent = new PPOAgent(OBS_DIM, NUM_ACTIONS);
+            await rlAgent.loadModel(savedModel);
+            console.log(`PPO Agent loaded from saved model (episode ${savedModel.episode || 0})`);
+            return;
+        }
+        
+        // 3. Fallback: Create new agent (no pre-training - we expect pretrained_model.json to be available)
+        rlAgent = new PPOAgent(OBS_DIM, NUM_ACTIONS);
+        console.warn('⚠️ No pre-trained or saved model found - agent will start with random weights');
+        console.warn('⚠️ This should not happen if pretrained_model.json is deployed with the game');
+        // Removed in-browser pre-training since we expect pretrained_model.json to always be available
+        // If the file is missing, the agent will start with random weights (poor performance)
+    } catch (error) {
+        console.error('Failed to initialize PPO agent:', error);
+        console.log('Falling back to placeholder agent');
+        loadPlaceholderAgent();
+    }
+}
+
+// Save model to IndexedDB
+async function exportModelWeights(extraMetadata = {}) {
+    if (!rlAgent || !(rlAgent instanceof PPOAgent)) {
+        throw new Error('RL agent not initialized');
+    }
+    
+    const weights = await rlAgent.policyNet.getWeights();
+    const weightsData = await Promise.all(weights.map(async (w) => {
+        const data = await w.data();
+        const payload = {
+            shape: w.shape,
+            dtype: w.dtype,
+            data: Array.from(data)
+        };
+        w.dispose();
+        return payload;
+    }));
+    
+    return {
+        weights: weightsData,
+        episode: trainingStats.episode,
+        bestScore: trainingStats.bestScore,
+        exportedAt: Date.now(),
+        ...extraMetadata
+    };
+}
+
+async function saveModelToStorage() {
+    if (!rlAgent || !(rlAgent instanceof PPOAgent)) return;
+    
+    try {
+        const payload = await exportModelWeights();
+        
+        // Save to IndexedDB
+        const db = await openDB();
+        const tx = db.transaction(['models'], 'readwrite');
+        const store = tx.objectStore('models');
+        
+        await store.put({
+            id: 'asteroid_droid_agent',
+            ...payload
+        });
+        
+        await tx.complete;
+        console.log('Model saved to IndexedDB');
+    } catch (error) {
+        console.error('Failed to save model:', error);
+    }
+}
+
+// Load model from IndexedDB
+async function loadModelFromStorage() {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(['models'], 'readonly');
+        const store = tx.objectStore('models');
+        const saved = await store.get('asteroid_droid_agent');
+        
+        if (saved && saved.weights) {
+            console.log(`Loading saved model (episode ${saved.episode || 0}, best score: ${saved.bestScore || 0})`);
+            return saved;
+        }
+        return null;
+    } catch (error) {
+        console.error('Failed to load model:', error);
+        return null;
+    }
+}
+
+// Open IndexedDB database
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open('AsteroidDroidRL', 1);
+        
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+        
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains('models')) {
+                db.createObjectStore('models', { keyPath: 'id' });
+            }
+        };
+    });
+}
+
+// Load training stats from saved model
+async function loadTrainingStats() {
+    try {
+        const saved = await loadModelFromStorage();
+        if (saved) {
+            trainingStats.episode = saved.episode || 0;
+            trainingStats.bestScore = saved.bestScore || 0;
+            updateTrainingUI();
+        }
+    } catch (error) {
+        console.error('Failed to load training stats:', error);
+    }
+}
+
+// Handle episode end for RL training
+async function handleEpisodeEnd() {
+    // Store final experience
+    if (lastObservation !== null) {
+        // Get current cargo health for reward calculation
+        const currentCargoHealth = (gameState.gameMode === 'mission' && cargoVessel) 
+            ? (cargoVessel.health || cargoVessel.maxHealth) 
+            : 100;
+        const reward = calculateReward(prevScore, prevHealth, prevShields, prevCargoHealth);
+        rlAgent.storeExperience(
+            lastObservation,
+            lastAction,
+            reward,
+            lastValue,
+            lastLogProb,
+            true  // Episode done
+        );
+    }
+    
+    // Update training stats
+    trainingStats.episode++;
+    trainingStats.episodeReward = gameState.score - episodeStartScore;
+    trainingStats.episodeLength = Date.now() - episodeStartTime;
+    trainingStats.totalReward += trainingStats.episodeReward;
+    
+    if (gameState.score > trainingStats.bestScore) {
+        trainingStats.bestScore = gameState.score;
+    }
+    
+    trainingStats.episodes.push(trainingStats.episode);
+    trainingStats.rewards.push(trainingStats.episodeReward);
+    trainingStats.scores.push(gameState.score);
+    
+    // Keep only last 100 episodes for display
+    if (trainingStats.episodes.length > 100) {
+        trainingStats.episodes.shift();
+        trainingStats.rewards.shift();
+        trainingStats.scores.shift();
+    }
+    
+    // Update training UI
+    updateTrainingUI();
+    
+    // Periodic training update
+    trainingUpdateCounter++;
+    if (trainingUpdateCounter >= TRAINING_UPDATE_FREQUENCY) {
+        await performTrainingUpdate();
+        trainingUpdateCounter = 0;
+    }
+    
+    // Auto-restart if autopilot is on (continuous training)
+    if (autopilotEnabled) {
+        setTimeout(() => {
+            restartGame();
+            startNewEpisode();
+        }, 1000);
+    }
+}
+
+// Start new episode
+function startNewEpisode() {
+    episodeStartScore = gameState.score;
+    episodeStartTime = Date.now();
+    lastObservation = null;
+    prevScore = gameState.score;
+    prevHealth = player.health;
+    prevShields = player.shields;
+    
+    // Initialize cargo health tracking
+    if (gameState.gameMode === 'mission' && cargoVessel) {
+        prevCargoHealth = cargoVessel.health || cargoVessel.maxHealth;
+    } else {
+        prevCargoHealth = 100;
+    }
+    
+    // Reset reward tracking counters
+    asteroidsDestroyedThisStep = 0;
+    powerupsCollectedThisStep = 0;
+    upgradesSelectedThisStep = 0;
+    prevAsteroidsDestroyed = 0;
+    prevPowerupsCollected = 0;
+    prevUpgradesSelected = 0;
+    prevEnemiesKilled = gameState.enemiesKilled;
+    tractorBeamActivatedThisStep = false;
+    prevTractorBeamActive = false;
+    targetsDestroyedWhileTractored = 0;
+    prevTargetsDestroyedWhileTractored = 0;
+}
+
+// Perform training update
+async function performTrainingUpdate() {
+    if (!rlAgent || !(rlAgent instanceof PPOAgent)) return;
+    
+    console.log(`Training update at episode ${trainingStats.episode}...`);
+    
+    try {
+        const losses = await rlAgent.update();
+        if (losses) {
+            console.log(`Training losses: policy=${(losses.policyLoss || 0).toFixed(4)}, value=${(losses.valueLoss || 0).toFixed(4)}, entropy=${(losses.entropy || 0).toFixed(4)}`);
+        }
+        
+        // Save model after training update
+        await saveModelToStorage();
+        
+        // Update UI with training info
+        updateTrainingUI();
+    } catch (error) {
+        console.error('Error during training update:', error);
+    }
+}
+
+// Update training UI (shows when autopilot is on)
+function updateTrainingUI() {
+    const trainingStatsDiv = document.getElementById('trainingStats');
+    
+    if (trainingStatsDiv) {
+        if (autopilotEnabled && rlAgent instanceof PPOAgent) {
+            trainingStatsDiv.classList.remove('hidden');
+            
+            // Update stats
+            const episodeEl = document.getElementById('trainingEpisode');
+            const bestScoreEl = document.getElementById('trainingBestScore');
+            const avgRewardEl = document.getElementById('trainingAvgReward');
+            const totalRewardEl = document.getElementById('trainingTotalReward');
+            
+            if (episodeEl) episodeEl.textContent = trainingStats.episode;
+            if (bestScoreEl) bestScoreEl.textContent = trainingStats.bestScore;
+            
+            if (trainingStats.rewards.length > 0) {
+                const avgReward = trainingStats.rewards.slice(-10).reduce((a, b) => a + b, 0) / Math.min(10, trainingStats.rewards.length);
+                if (avgRewardEl) avgRewardEl.textContent = Math.round(avgReward);
+            }
+            
+            if (totalRewardEl) totalRewardEl.textContent = Math.round(trainingStats.totalReward);
+        } else {
+            trainingStatsDiv.classList.add('hidden');
+        }
+    }
+}
+
+function getTrainingStatsSnapshot() {
+    const recentRewards = trainingStats.rewards.slice(-10);
+    const avgReward = recentRewards.length ? recentRewards.reduce((a, b) => a + b, 0) / recentRewards.length : 0;
+    const lastScore = trainingStats.scores.length ? trainingStats.scores[trainingStats.scores.length - 1] : 0;
+    
+    return {
+        episode: trainingStats.episode,
+        bestScore: trainingStats.bestScore,
+        avgReward,
+        totalReward: trainingStats.totalReward,
+        lastScore
+    };
+}
+
+function setupOfflineAPI() {
+    if (!OFFLINE_MODE || window.offlineAPIReady) return;
+    
+    window.offlineAPI = {
+        ensureAutopilot: () => {
+            if (!autopilotEnabled) {
+                autopilotEnabled = true;
+                updateAutopilotUI();
+                startNewEpisode();
+            }
+        },
+        getTrainingStats: () => getTrainingStatsSnapshot(),
+        exportModel: async () => {
+            const data = await exportModelWeights({ pretrained: true });
+            return data;
+        },
+        restartEpisode: () => restartGame(),
+        setHeadless: (headless) => {
+            // This can be called to toggle headless mode dynamically
+            if (headless) {
+                urlParams.set('headless', '1');
+            } else {
+                urlParams.delete('headless');
+            }
+        }
+    };
+    
+    window.offlineAPIReady = true;
+}
+
+// Placeholder agent (random actions)
+function loadPlaceholderAgent() {
+    rlAgent = {
+        getAction: function(obs, deterministic=false) {
+            // Simple heuristic: move toward nearest enemy if health > 50%, otherwise avoid
+            const playerHealth = obs[3]; // health normalized [0, 1]
+            
+            if (playerHealth > 0.5) {
+                // Aggressive: try to shoot or move toward enemies
+                const nearestEnemyDist = obs[9]; // First enemy distance
+                if (nearestEnemyDist < 0.5) {
+                    return Math.random() < 0.7 ? ACTIONS.SHOOT_PRIMARY : ACTIONS.MOVE_UP;
+                }
+                return ACTIONS.MOVE_UP;
+            } else {
+                // Defensive: avoid and shoot
+                return Math.random() < 0.5 ? ACTIONS.MOVE_DOWN : ACTIONS.SHOOT_PRIMARY;
+            }
+        }
+    };
+    
+    console.log('Placeholder agent loaded (heuristic-based)');
+}
+
+// Helper: Softmax function
+function softmax(logits) {
+    const max = Math.max(...logits);
+    const exp = logits.map(x => Math.exp(x - max));
+    const sum = exp.reduce((a, b) => a + b, 0);
+    return exp.map(x => x / sum);
+}
+
+// Helper: Sample from probability distribution
+function sampleFromDistribution(probs) {
+    const rand = Math.random();
+    let cumsum = 0;
+    for (let i = 0; i < probs.length; i++) {
+        cumsum += probs[i];
+        if (rand < cumsum) {
+            return i;
+        }
+    }
+    return probs.length - 1;
+}
+
+// Save demo data to file (for training)
+// Update autopilot UI
+function updateAutopilotUI() {
+    const autopilotBtn = document.getElementById('autopilotToggle');
+    const autopilotStatus = document.getElementById('autopilotStatus');
+    
+    if (autopilotBtn && autopilotStatus) {
+        if (autopilotEnabled) {
+            autopilotBtn.classList.add('active');
+            autopilotStatus.textContent = 'Autopilot: ON';
+            autopilotStatus.style.color = '#00ff00';
+        } else {
+            autopilotBtn.classList.remove('active');
+            autopilotStatus.textContent = 'Autopilot: OFF';
+            autopilotStatus.style.color = '#66aaff';
+        }
+    }
+}
+
+// Toggle training mode
 
 function updateTractorBeam() {
     if (!tractorBeam.active) {
@@ -2117,18 +4681,29 @@ function updateTractorBeam() {
         tractorBeam.target.vx *= damping;
         tractorBeam.target.vy *= damping;
     } else if (tractorBeam.targetType === 'enemy') {
-        // Slow pull force for enemies
-        const enemyPullForce = 0.03; // Reduced from 0.08 - slower pull
-        const pullX = -(dx / dist) * enemyPullForce; // Negate to pull toward player
-        const pullY = -(dy / dist) * enemyPullForce; // Negate to pull toward player
+        // Pull force for enemies (similar to asteroids but slightly stronger)
+        const pullForce = 0.08;
+        const pullX = -(dx / dist) * pullForce;
+        const pullY = -(dy / dist) * pullForce;
         
         tractorBeam.target.vx += pullX;
         tractorBeam.target.vy += pullY;
         
-        // More damping for enemies (slower, more controlled movement)
-        const enemyDamping = 0.97; // Increased damping
-        tractorBeam.target.vx *= enemyDamping;
-        tractorBeam.target.vy *= enemyDamping;
+        const damping = 0.96;
+        tractorBeam.target.vx *= damping;
+        tractorBeam.target.vy *= damping;
+    } else if (tractorBeam.targetType === 'boss') {
+        // Pull force for bosses (stronger pull since they're bigger)
+        const bossPullForce = 0.1;
+        const pullX = -(dx / dist) * bossPullForce;
+        const pullY = -(dy / dist) * bossPullForce;
+        
+        tractorBeam.target.vx += pullX;
+        tractorBeam.target.vy += pullY;
+        
+        const bossDamping = 0.97;
+        tractorBeam.target.vx *= bossDamping;
+        tractorBeam.target.vy *= bossDamping;
     }
 }
 
@@ -2137,6 +4712,8 @@ function collectPowerup(type) {
     // All powerups are now upgrade type - opens upgrade menu
     if (type === 'upgrade') {
         upgradePoints++;
+        // Track powerup collection for RL rewards
+        powerupsCollectedThisStep++;
         showUpgradeMenu();
     }
 }
@@ -2146,14 +4723,17 @@ function spawnAlly() {
     allies.push({
         x: player.x + (Math.random() - 0.5) * 100,
         y: player.y + (Math.random() - 0.5) * 100,
-        width: 25,
-        height: 25,
+        width: 44, // 75% bigger: 25 * 1.75 = 43.75, rounded to 44
+        height: 44, // 75% bigger: 25 * 1.75 = 43.75, rounded to 44
         speed: 3,
         shootCooldown: 0,
         maxShootCooldown: 30,
         damage: 15,
+        health: 50, // Ally health - can be destroyed
+        maxHealth: 50,
         offsetAngle: Math.random() * Math.PI * 2,
-        orbitRadius: 80 + Math.random() * 40
+        orbitRadius: 80 + Math.random() * 40,
+        rotation: 0 // Initialize rotation
     });
 }
 
@@ -2167,8 +4747,10 @@ function updateAllies() {
         ally.x = target.x + Math.cos(angle) * ally.orbitRadius;
         ally.y = target.y + Math.sin(angle) * ally.orbitRadius;
 
-        ally.shootCooldown--;
-        if (ally.shootCooldown <= 0 && enemies.length > 0) {
+        // Set rotation to face nearest enemy or movement direction
+        if (!ally.rotation) ally.rotation = 0;
+        
+        if (enemies.length > 0) {
             const nearest = enemies.reduce((closest, enemy) => {
                 const dist = Math.hypot(enemy.x - ally.x, enemy.y - ally.y);
                 const closestDist = Math.hypot(closest.x - ally.x, closest.y - ally.y);
@@ -2179,7 +4761,10 @@ function updateAllies() {
             const dy = nearest.y - ally.y;
             const dist = Math.hypot(dx, dy);
 
-            if (dist < 400) {
+            // Face nearest enemy
+            ally.rotation = Math.atan2(dx, -dy); // Same rotation system as player
+            
+            if (dist < 400 && ally.shootCooldown <= 0) {
                 ally.shootCooldown = ally.maxShootCooldown;
                 sounds.allyShot();
                 bullets.push({
@@ -2194,7 +4779,12 @@ function updateAllies() {
                     glow: true
                 });
             }
+        } else {
+            // Face direction of orbit movement if no enemies
+            ally.rotation = angle + Math.PI / 2;
         }
+        
+        ally.shootCooldown--;
     });
 }
 
@@ -2401,6 +4991,22 @@ function updateFireworks() {
 function drawFireworks() {
     if (fireworks.length === 0) return;
     
+    if (useWebGL && particleRenderer) {
+        // WebGL rendering - use particle renderer for fireworks
+        fireworks.forEach(firework => {
+            const alpha = firework.life / firework.maxLife;
+            if (alpha < 0.1) return;
+            
+            const color = ColorUtils.parseColor(firework.color, alpha);
+            particleRenderer.addParticle(
+                firework.x, firework.y,
+                firework.size * alpha,
+                color[0], color[1], color[2], color[3]
+            );
+        });
+        particleRenderer.render();
+    } else if (ctx) {
+        // Canvas 2D fallback
     ctx.save();
     
     for (let i = 0; i < fireworks.length; i++) {
@@ -2434,6 +5040,7 @@ function drawFireworks() {
     }
     
     ctx.restore();
+    }
 }
 
 // Upgrade system
@@ -2475,6 +5082,9 @@ function applyUpgrade(key) {
     
     const upgrade = upgrades[key];
     upgradePoints--;
+    
+    // Track upgrade selection for RL rewards
+    upgradesSelectedThisStep++;
 
     if (key === 'health') {
         player.maxHealth += 20;
@@ -2494,8 +5104,8 @@ function spawnCargoAlly() {
     allies.push({
         x: cargoVessel.x + (Math.random() - 0.5) * 100,
         y: cargoVessel.y + (Math.random() - 0.5) * 100,
-        width: 25,
-        height: 25,
+        width: 44, // 75% bigger: 25 * 1.75 = 43.75, rounded to 44
+        height: 44, // 75% bigger: 25 * 1.75 = 43.75, rounded to 44
         speed: 3,
         shootCooldown: 0,
         maxShootCooldown: 30,
@@ -2505,7 +5115,8 @@ function spawnCargoAlly() {
         isCargoAlly: true,
         target: cargoVessel,
         health: 50,
-        maxHealth: 50
+        maxHealth: 50,
+        rotation: 0 // Initialize rotation
     });
 }
 
@@ -2582,8 +5193,117 @@ function hexToRgba(hex, alpha) {
 
 // Enhanced rendering functions
 function drawPlayer() {
-    if (!ctx || !player || isNaN(player.x) || isNaN(player.y)) return;
+    if (!player || isNaN(player.x) || isNaN(player.y)) return;
     
+    if (useWebGL && spriteRenderer) {
+        // WebGL rendering
+        spriteRenderer.begin();
+        
+        // Health bar above ship
+        const healthPercent = player.health / player.maxHealth;
+        const barWidth = player.width + 10;
+        const barHeight = 4;
+        const barY = player.y - player.height / 2 - 15;
+        
+        // Health bar background
+        spriteRenderer.drawRect(
+            player.x - barWidth / 2, barY,
+            barWidth, barHeight,
+            new Float32Array([0, 0, 0, 0.6])
+        );
+        
+        // Health bar fill (green to red)
+        const healthR = healthPercent > 0.5 ? (1 - (healthPercent - 0.5) * 2) : 1;
+        const healthG = healthPercent > 0.5 ? 1 : healthPercent * 2;
+        const healthB = 0;
+        spriteRenderer.drawRect(
+            player.x - barWidth / 2, barY,
+            barWidth * healthPercent, barHeight,
+            new Float32Array([healthR, healthG, healthB, 1])
+        );
+        
+        // Shield effect - two complete circular rings around player ship
+        if (player.shields > 0) {
+            const shieldPercent = player.shields / player.maxShields;
+            const shieldRadius = player.width / 2 + 18;
+            
+            // Draw two complete circles (inner and outer rings)
+            circleRenderer.begin();
+            
+            // Outer ring - thicker, softer glow
+            const outerRingColor = new Float32Array([0, 0.8, 1, shieldPercent * 0.6]);
+            circleRenderer.drawCircle(player.x, player.y, shieldRadius + 2, outerRingColor);
+            
+            // Inner ring - thinner, brighter
+            const innerRingColor = new Float32Array([0, 1, 1, shieldPercent * 0.9]);
+            circleRenderer.drawCircle(player.x, player.y, shieldRadius - 1, innerRingColor);
+            
+            circleRenderer.end();
+        }
+        
+        // Engine particles (handled by particle system)
+        if (player.engineGlow > 0) {
+            const backY = player.height / 2;
+            for (let i = 0; i < 3; i++) {
+                const offset = (i - 1) * 8;
+                const backWorldX = player.x + offset * Math.cos(player.rotation) - backY * Math.sin(player.rotation);
+                const backWorldY = player.y + offset * Math.sin(player.rotation) + backY * Math.cos(player.rotation);
+                const particleSpeed = 2 + Math.random() * 2;
+                const particleVx = -Math.sin(player.rotation) * particleSpeed;
+                const particleVy = Math.cos(player.rotation) * particleSpeed;
+                
+                particles.push({
+                    x: backWorldX,
+                    y: backWorldY,
+                    vx: particleVx + (Math.random() - 0.5) * 1,
+                    vy: particleVy + (Math.random() - 0.5) * 1,
+                    life: 10,
+                    maxLife: 10,
+                    size: 2,
+                    color: `hsl(200, 100%, ${60 + Math.random() * 40}%)`,
+                    glow: true
+                });
+            }
+        }
+        
+        // Draw ship sprite with damage effects
+        // healthPercent already declared above for health bar
+        
+        // Use damaged ship texture when health is critical (below 30%)
+        const isCriticalDamage = healthPercent < 0.3;
+        const shipTexture = isCriticalDamage 
+            ? (textures.damagedShip || textures.ship || null)
+            : (textures.ship || null);
+        
+        // Damage effect: darken ship color based on health
+        const damageFactor = 1.0 - (1.0 - healthPercent) * 0.5; // Darken up to 50% when heavily damaged
+        const shipColor = new Float32Array([damageFactor, damageFactor, damageFactor, 1.0]);
+        
+        if (!shipTexture) {
+            console.warn('Ship texture not loaded, using colored rectangle. Textures object:', textures);
+            // Draw a colored rectangle as fallback
+            spriteRenderer.drawRect(
+                player.x - player.width / 2,
+                player.y - player.height / 2,
+                player.width,
+                player.height,
+                new Float32Array([0.2 * damageFactor, 0.6 * damageFactor, 1.0 * damageFactor, 1.0]) // Blue color with damage
+            );
+        } else {
+            // Draw with texture - darken based on damage
+            spriteRenderer.drawSprite(
+                shipTexture,
+                player.x, player.y,
+                player.width, player.height,
+                player.rotation + Math.PI, // Add 180 degrees to fix orientation
+                shipColor, // Darkened color to show damage
+                0.5, 0.5
+            );
+        }
+        
+        spriteRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
     ctx.save();
     ctx.translate(player.x, player.y);
     
@@ -2612,51 +5332,45 @@ function drawPlayer() {
     // Now rotate for ship drawing
     ctx.rotate(player.rotation);
     
-    // Shield effect with glow (enhanced to show status)
+    // Shield effect - two complete circular rings
     if (player.shields > 0) {
-        const shieldAlpha = player.shields / player.maxShields;
         const shieldPercent = player.shields / player.maxShields;
+        const shieldRadius = player.width / 2 + 18;
         
-        // Outer shield glow
-        const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, player.width / 2 + 10);
-        gradient.addColorStop(0, `rgba(0, 150, 255, ${shieldAlpha * 0.6})`);
-        gradient.addColorStop(0.5, `rgba(0, 150, 255, ${shieldAlpha * 0.3})`);
-        gradient.addColorStop(1, `rgba(0, 150, 255, 0)`);
-        
-        ctx.fillStyle = gradient;
+        // Outer ring - thicker, softer glow
+        ctx.strokeStyle = `rgba(0, 200, 255, ${shieldPercent * 0.6})`;
+        ctx.lineWidth = 4;
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = 'rgba(0, 200, 255, 0.5)';
         ctx.beginPath();
-        ctx.arc(0, 0, player.width / 2 + 10, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Shield ring (shows percentage)
-        ctx.strokeStyle = `rgba(0, 200, 255, ${shieldAlpha})`;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(0, 0, player.width / 2 + 8, 0, Math.PI * 2);
+        ctx.arc(0, 0, shieldRadius + 2, 0, Math.PI * 2);
         ctx.stroke();
         
-        // Shield percentage indicator (arc)
-        ctx.strokeStyle = `rgba(100, 255, 255, ${shieldAlpha})`;
+        // Inner ring - thinner, brighter
+        ctx.strokeStyle = `rgba(0, 255, 255, ${shieldPercent * 0.9})`;
         ctx.lineWidth = 2;
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = 'rgba(0, 255, 255, 0.3)';
         ctx.beginPath();
-        ctx.arc(0, 0, player.width / 2 + 12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * shieldPercent);
+        ctx.arc(0, 0, shieldRadius - 1, 0, Math.PI * 2);
         ctx.stroke();
+        
+        // Reset shadow
+        ctx.shadowBlur = 0;
     } else {
         // Show broken shield indicator when shields are down
         ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
         ctx.lineWidth = 1;
         ctx.setLineDash([5, 5]);
         ctx.beginPath();
-        ctx.arc(0, 0, player.width / 2 + 8, 0, Math.PI * 2);
+        ctx.arc(0, 0, player.width / 2 + 18, 0, Math.PI * 2);
         ctx.stroke();
         ctx.setLineDash([]);
     }
 
     // Engine glow (drawn at back of ship, relative to rotation)
-    // Back of ship is at (0, player.height/2) in rotated coordinates
     if (player.engineGlow > 0) {
-        // Engine glow gradient - extends backward from the ship
-        const backY = player.height / 2; // Back of ship in rotated coords
+            const backY = player.height / 2;
         const glowGradient = ctx.createLinearGradient(0, backY, 0, backY + 15);
         glowGradient.addColorStop(0, `rgba(0, 200, 255, ${player.engineGlow * 0.8})`);
         glowGradient.addColorStop(0.5, `rgba(100, 200, 255, ${player.engineGlow * 0.5})`);
@@ -2665,19 +5379,11 @@ function drawPlayer() {
         ctx.fillStyle = glowGradient;
         ctx.fillRect(-player.width / 4, backY, player.width / 2, 15);
         
-        // Engine particles - spawn at back of ship and move backward relative to rotation
+            // Engine particles
         for (let i = 0; i < 3; i++) {
             const offset = (i - 1) * 8;
-            // Back of ship in rotated coords is at (offset, backY)
-            // Transform to world coordinates using rotation matrix
-            // For a point (x, y) in rotated space: 
-            // worldX = centerX + x*cos(rot) - y*sin(rot)
-            // worldY = centerY + x*sin(rot) + y*cos(rot)
-            // But canvas Y increases downward, so we adjust:
             const backWorldX = player.x + offset * Math.cos(player.rotation) - backY * Math.sin(player.rotation);
             const backWorldY = player.y + offset * Math.sin(player.rotation) + backY * Math.cos(player.rotation);
-            // Particle velocity should be backward relative to ship rotation (opposite of forward direction)
-            // Forward is (sin(rotation), -cos(rotation)), so backward is (-sin(rotation), cos(rotation))
             const particleSpeed = 2 + Math.random() * 2;
             const particleVx = -Math.sin(player.rotation) * particleSpeed;
             const particleVy = Math.cos(player.rotation) * particleSpeed;
@@ -2697,18 +5403,21 @@ function drawPlayer() {
     }
 
     // Draw ship image if loaded, otherwise fall back to drawn shape
-    if (playerShipImageLoaded && playerShipImage) {
-        // Draw ship image, centered and rotated
-        // Image should point up when rotation is 0
+    // Use damaged ship texture when health is critical (below 30%)
+    const isCriticalDamage = healthPercent < 0.3;
+    const shipImageToUse = isCriticalDamage && damagedPlayerShipImageLoaded && damagedPlayerShipImage
+        ? damagedPlayerShipImage
+        : (playerShipImageLoaded && playerShipImage ? playerShipImage : null);
+    
+    if (shipImageToUse) {
         ctx.drawImage(
-            playerShipImage,
-            -player.width / 2,  // X position (centered)
-            -player.height / 2, // Y position (centered)
-            player.width,       // Width
-            player.height       // Height
+            shipImageToUse,
+                -player.width / 2,
+                -player.height / 2,
+                player.width,
+                player.height
         );
     } else {
-        // Fallback: Draw ship shape if image not loaded
     const shipGradient = ctx.createLinearGradient(-player.width / 2, -player.height / 2, 0, player.height / 2);
     shipGradient.addColorStop(0, '#0066aa');
     shipGradient.addColorStop(0.5, '#00aaff');
@@ -2723,14 +5432,12 @@ function drawPlayer() {
     ctx.closePath();
     ctx.fill();
 
-    // Ship details with glow
     ctx.fillStyle = '#00ccff';
     ctx.shadowBlur = 10;
     ctx.shadowColor = '#00ccff';
     ctx.fillRect(-player.width / 4, -player.height / 4, player.width / 2, player.height / 4);
     ctx.shadowBlur = 0;
     
-    // Ship outline
     ctx.strokeStyle = '#00ffff';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -2743,9 +5450,52 @@ function drawPlayer() {
     }
     
     ctx.restore();
+    }
 }
 
 function drawBullets() {
+    if (useWebGL && circleRenderer && trailRenderer) {
+        // WebGL rendering - use circles for bullets to match Canvas 2D
+        trailRenderer.begin();
+        circleRenderer.begin();
+        
+        bullets.forEach(bullet => {
+            // Draw missile trail
+            if (bullet.trail && bullet.trail.length > 1) {
+                trailRenderer.drawTrail(bullet.trail, bullet.color, 2, 0.5);
+            }
+            
+            // Draw bullet as circle with glow effect (matching Canvas 2D)
+            const color = ColorUtils.parseColor(bullet.color);
+            
+            if (bullet.glow) {
+                // Outer glow (larger, more transparent)
+                const glowColor = ColorUtils.parseColor(bullet.color, 0.3);
+                circleRenderer.drawCircle(bullet.x, bullet.y, bullet.size * 2.5, glowColor);
+                
+                // Mid glow
+                const midGlowColor = ColorUtils.parseColor(bullet.color, 0.6);
+                circleRenderer.drawCircle(bullet.x, bullet.y, bullet.size * 1.8, midGlowColor);
+            }
+            
+            // Bullet core (bright center)
+            circleRenderer.drawCircle(bullet.x, bullet.y, bullet.size, color);
+            
+            // Laser beam effect
+            if (bullet.type === 'laser') {
+                const laserColor = ColorUtils.parseColor(bullet.color, 0.8);
+                const laserPoints = [
+                    { x: bullet.x, y: bullet.y },
+                    { x: bullet.x, y: bullet.y + 30 }
+                ];
+                trailRenderer.drawTrail(laserPoints, laserColor, 3, 0.8);
+            }
+        });
+        
+        trailRenderer.end();
+        circleRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
     bullets.forEach(bullet => {
         ctx.save();
         
@@ -2774,7 +5524,6 @@ function drawBullets() {
                 const gradient = ctx.createRadialGradient(bullet.x, bullet.y, 0, bullet.x, bullet.y, bullet.size * 2);
                 gradient.addColorStop(0, bullet.color);
                 
-                // Convert color to rgba for gradient stops
                 let colorWithAlpha = bullet.color;
                 if (bullet.color.startsWith('#')) {
                     colorWithAlpha = hexToRgba(bullet.color, 0.5);
@@ -2787,7 +5536,6 @@ function drawBullets() {
                 }
                 gradient.addColorStop(0.5, colorWithAlpha);
                 
-                // Fully transparent at edge
                 let transparentColor = bullet.color;
                 if (bullet.color.startsWith('#')) {
                     transparentColor = hexToRgba(bullet.color, 0);
@@ -2805,7 +5553,6 @@ function drawBullets() {
                 ctx.arc(bullet.x, bullet.y, bullet.size * 2, 0, Math.PI * 2);
                 ctx.fill();
             } catch (e) {
-                // Fallback: just draw the bullet without glow if gradient fails
                 ctx.fillStyle = bullet.color;
                 ctx.beginPath();
                 ctx.arc(bullet.x, bullet.y, bullet.size, 0, Math.PI * 2);
@@ -2833,9 +5580,185 @@ function drawBullets() {
         
         ctx.restore();
     });
+    }
+}
+
+// Draw bosses
+function drawBosses() {
+    if (useWebGL && spriteRenderer) {
+        // WebGL rendering
+        spriteRenderer.begin();
+        
+        bosses.forEach(boss => {
+            // Health bar (larger for boss)
+            const healthPercent = boss.health / boss.maxHealth;
+            const barY = boss.y - boss.height / 2 - 20;
+            
+            // Health bar background
+            spriteRenderer.drawRect(
+                boss.x - boss.width / 2 - 5, barY,
+                boss.width + 10, 8,
+                new Float32Array([0, 0, 0, 0.7])
+            );
+            
+            // Health bar red background
+            spriteRenderer.drawRect(
+                boss.x - boss.width / 2, barY + 2,
+                boss.width, 6,
+                new Float32Array([1, 0, 0, 1])
+            );
+            
+            // Health bar fill
+            spriteRenderer.drawRect(
+                boss.x - boss.width / 2, barY + 2,
+                boss.width * healthPercent, 6,
+                new Float32Array([0, 1, 0, 1])
+            );
+            
+            // Draw boss ship
+            const bossTexture = textures.boss || null;
+            const bossHealthPercent = boss.health / boss.maxHealth;
+            const bossDamageFactor = 1.0 - (1.0 - bossHealthPercent) * 0.5;
+            const bossColor = bossTexture 
+                ? new Float32Array([bossDamageFactor, bossDamageFactor, bossDamageFactor, 1.0])
+                : new Float32Array([1, 0, 0, 1]); // Red fallback
+            
+            spriteRenderer.drawSprite(
+                bossTexture,
+                boss.x, boss.y,
+                boss.width, boss.height,
+                boss.rotation + Math.PI, // Same rotation offset as player ship
+                bossColor,
+                0.5, 0.5
+            );
+        });
+        
+        spriteRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
+        bosses.forEach(boss => {
+            ctx.save();
+            ctx.translate(boss.x, boss.y);
+            
+            // Health bar
+            const healthPercent = boss.health / boss.maxHealth;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(-boss.width / 2 - 5, -boss.height / 2 - 20, boss.width + 10, 8);
+            ctx.fillStyle = 'red';
+            ctx.fillRect(-boss.width / 2, -boss.height / 2 - 18, boss.width, 6);
+            ctx.fillStyle = 'green';
+            ctx.fillRect(-boss.width / 2, -boss.height / 2 - 18, boss.width * healthPercent, 6);
+            
+            // Rotate for ship drawing
+            ctx.rotate(boss.rotation);
+            
+            // Boss glow
+            ctx.shadowBlur = 25;
+            ctx.shadowColor = boss.glowColor;
+            
+            // Draw boss ship image if loaded
+            if (bossShipImageLoaded && bossShipImage) {
+                ctx.drawImage(
+                    bossShipImage,
+                    -boss.width / 2,
+                    -boss.height / 2,
+                    boss.width,
+                    boss.height
+                );
+            } else {
+                // Fallback drawn shape
+                const bossGradient = ctx.createLinearGradient(-boss.width / 2, -boss.height / 2, 0, boss.height / 2);
+                bossGradient.addColorStop(0, boss.color);
+                bossGradient.addColorStop(1, boss.color.replace('50%)', '30%)'));
+                
+                ctx.fillStyle = bossGradient;
+                ctx.beginPath();
+                ctx.moveTo(0, boss.height / 2);
+                ctx.lineTo(-boss.width / 2, -boss.height / 2);
+                ctx.lineTo(0, -boss.height / 2 + 5);
+                ctx.lineTo(boss.width / 2, -boss.height / 2);
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.fillStyle = boss.glowColor;
+                ctx.fillRect(-boss.width / 4, -boss.height / 4, boss.width / 2, boss.height / 4);
+                
+                ctx.strokeStyle = boss.glowColor;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(0, boss.height / 2);
+                ctx.lineTo(-boss.width / 2, -boss.height / 2);
+                ctx.lineTo(0, -boss.height / 2 + 5);
+                ctx.lineTo(boss.width / 2, -boss.height / 2);
+                ctx.closePath();
+                ctx.stroke();
+            }
+            
+            ctx.restore();
+        });
+    }
 }
 
 function drawEnemies() {
+    if (useWebGL && spriteRenderer) {
+        // WebGL rendering
+        spriteRenderer.begin();
+        
+        enemies.forEach(enemy => {
+            // Health bar
+            const healthPercent = enemy.health / enemy.maxHealth;
+            const barY = enemy.y - enemy.height / 2 - 12;
+            
+            // Health bar background
+            spriteRenderer.drawRect(
+                enemy.x - enemy.width / 2 - 2, barY,
+                enemy.width + 4, 6,
+                new Float32Array([0, 0, 0, 0.5])
+            );
+            
+            // Health bar red background
+            spriteRenderer.drawRect(
+                enemy.x - enemy.width / 2, barY + 2,
+                enemy.width, 4,
+                new Float32Array([1, 0, 0, 1])
+            );
+            
+            // Health bar green fill
+            spriteRenderer.drawRect(
+                enemy.x - enemy.width / 2, barY + 2,
+                enemy.width * healthPercent, 4,
+                new Float32Array([0, 1, 0, 1])
+            );
+            
+            // Draw enemy ship with damage effects
+            const enemyTexture = textures.enemyShip || null;
+            const enemyColor = ColorUtils.parseColor(enemy.color);
+            const enemyHealthPercent = enemy.health / enemy.maxHealth;
+            
+            // Damage effect: darken ship color based on health
+            const enemyDamageFactor = 1.0 - (1.0 - enemyHealthPercent) * 0.5; // Darken up to 50% when heavily damaged
+            const finalEnemyColor = enemyTexture 
+                ? new Float32Array([enemyDamageFactor, enemyDamageFactor, enemyDamageFactor, 1.0])
+                : new Float32Array([
+                    enemyColor[0] * enemyDamageFactor,
+                    enemyColor[1] * enemyDamageFactor,
+                    enemyColor[2] * enemyDamageFactor,
+                    enemyColor[3]
+                ]);
+            
+            spriteRenderer.drawSprite(
+                enemyTexture,
+                enemy.x, enemy.y,
+                enemy.width, enemy.height,
+                enemy.rotation + Math.PI, // Same rotation offset as player ship (180 degrees)
+                finalEnemyColor,
+                0.5, 0.5
+            );
+        });
+        
+        spriteRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
     enemies.forEach(enemy => {
         ctx.save();
         ctx.translate(enemy.x, enemy.y);
@@ -2858,16 +5781,14 @@ function drawEnemies() {
         
         // Draw enemy ship image if loaded, otherwise fall back to drawn shape
         if (enemyShipImageLoaded && enemyShipImage) {
-            // Draw enemy ship image, centered
             ctx.drawImage(
                 enemyShipImage,
-                -enemy.width / 2,  // X position (centered)
-                -enemy.height / 2, // Y position (centered)
-                enemy.width,       // Width
-                enemy.height       // Height
+                    -enemy.width / 2,
+                    -enemy.height / 2,
+                    enemy.width,
+                    enemy.height
             );
         } else {
-            // Fallback: Draw enemy ship shape if image not loaded
         const enemyGradient = ctx.createLinearGradient(-enemy.width / 2, -enemy.height / 2, 0, enemy.height / 2);
         enemyGradient.addColorStop(0, enemy.color);
         enemyGradient.addColorStop(1, enemy.color.replace('50%)', '30%)'));
@@ -2881,7 +5802,6 @@ function drawEnemies() {
         ctx.closePath();
         ctx.fill();
         
-        // Enemy details
         ctx.fillStyle = enemy.glowColor;
         ctx.fillRect(-enemy.width / 4, -enemy.height / 4, enemy.width / 2, enemy.height / 4);
         
@@ -2898,6 +5818,7 @@ function drawEnemies() {
         
         ctx.restore();
     });
+    }
 }
 
 function drawTractorBeam() {
@@ -2911,7 +5832,81 @@ function drawTractorBeam() {
     const targetX = tractorBeam.target.x;
     const targetY = tractorBeam.target.y;
     
-    // Draw tractor beam line with glow effect
+    if (useWebGL && spriteRenderer) {
+        // WebGL rendering - draw solid continuous beam from front of ship to target
+        spriteRenderer.begin();
+        
+        // Calculate beam properties
+        const dx = targetX - frontX;
+        const dy = targetY - frontY;
+        const length = Math.hypot(dx, dy);
+        const angle = Math.atan2(dy, dx);
+        const centerX = (frontX + targetX) / 2;
+        const centerY = (frontY + targetY) / 2;
+        
+        // Pulsing effect
+        const pulse = Math.sin(Date.now() / 100) * 0.2 + 0.8;
+        
+        // Draw continuous beam as rotated rectangle
+        // Rectangle is drawn with width=length (along beam) and height=beamWidth (thickness)
+        // Rotated by angle to align from front of ship to target
+        
+        // Outer glow (wider, more transparent)
+        const outerGlowColor = new Float32Array([0, 1, 1, 0.3 * pulse]);
+        spriteRenderer.drawSprite(
+            null,
+            centerX, centerY,
+            length, 12, // width=length (beam length), height=12 (beam thickness)
+            angle, // Rotate by angle to align with beam direction
+            outerGlowColor,
+            0.5, 0.5
+        );
+        
+        // Mid glow
+        const midGlowColor = new Float32Array([0, 1, 1, 0.5 * pulse]);
+        spriteRenderer.drawSprite(
+            null,
+            centerX, centerY,
+            length, 8,
+            angle,
+            midGlowColor,
+            0.5, 0.5
+        );
+        
+        // Main solid beam (bright center)
+        const mainBeamColor = new Float32Array([1, 1, 1, 0.9 * pulse]);
+        spriteRenderer.drawSprite(
+            null,
+            centerX, centerY,
+            length, 4,
+            angle,
+            mainBeamColor,
+            0.5, 0.5
+        );
+        
+        // Inner bright core
+        const coreColor = new Float32Array([0, 1, 1, 1.0 * pulse]);
+        spriteRenderer.drawSprite(
+            null,
+            centerX, centerY,
+            length, 2,
+            angle,
+            coreColor,
+            0.5, 0.5
+        );
+        
+        // Draw particles along beam
+        for (let i = 0; i < 5; i++) {
+            const t = (Date.now() / 50 + i * 0.2) % 1;
+            const x = frontX + (targetX - frontX) * t;
+            const y = frontY + (targetY - frontY) * t;
+            const particleColor = new Float32Array([0, 1, 1, 0.8]);
+            spriteRenderer.drawSprite(null, x, y, 4, 4, 0, particleColor, 0.5, 0.5);
+        }
+        
+        spriteRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
     ctx.save();
     
     // Outer glow
@@ -2963,9 +5958,33 @@ function drawTractorBeam() {
     }
     
     ctx.restore();
+    }
 }
 
 function drawAsteroids() {
+    if (useWebGL && spriteRenderer) {
+        // WebGL rendering - draw asteroids using sprite
+        spriteRenderer.begin();
+        
+        asteroids.forEach(asteroid => {
+            const asteroidTexture = textures.asteroid || null;
+            if (!asteroidTexture) return; // Skip drawing if texture not loaded
+            
+            const asteroidColor = new Float32Array([1, 1, 1, 1]); // White to show texture properly
+            
+            spriteRenderer.drawSprite(
+                asteroidTexture,
+                asteroid.x, asteroid.y,
+                asteroid.width, asteroid.height,
+                asteroid.rotation, // Use asteroid's rotation
+                asteroidColor,
+                0.5, 0.5 // Center origin
+            );
+        });
+        
+        spriteRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
     asteroids.forEach(asteroid => {
         ctx.save();
         ctx.translate(asteroid.x, asteroid.y);
@@ -2992,7 +6011,6 @@ function drawAsteroids() {
                 else ctx.lineTo(x, y);
             });
         } else {
-            // Fallback circle
             ctx.arc(0, 0, asteroid.width / 2, 0, Math.PI * 2);
         }
         ctx.closePath();
@@ -3013,27 +6031,130 @@ function drawAsteroids() {
             ctx.fill();
         }
         
+            ctx.globalAlpha = 1.0; // Reset alpha
         ctx.restore();
     });
+    }
 }
 
 function drawPowerups() {
+    if (useWebGL && spriteRenderer && circleRenderer) {
+        // WebGL rendering
+        spriteRenderer.begin();
+        circleRenderer.begin();
+        
+        powerups.forEach(powerup => {
+            // Use token texture if available - only draw if texture is loaded
+            const tokenTexture = textures.token || null;
+            if (!tokenTexture) return; // Skip drawing if texture not loaded
+            
+            const pulseSize = powerup.width / 2 * (1 + Math.sin(powerup.pulse) * 0.3);
+            
+            // Glimmer effect: brightness pulse
+            const glimmer = Math.sin(powerup.pulse * 2) * 0.3 + 0.7; // 0.4 to 1.0
+            const tokenColor = new Float32Array([glimmer, glimmer, glimmer, 1]); // Brightness pulse
+            
+            // Draw outer glow (sparkle effect)
+            const sparkleTime = powerup.pulse * 3;
+            const sparkleAlpha = (Math.sin(sparkleTime) * 0.5 + 0.5) * 0.4;
+            const sparkleColor = new Float32Array([1, 1, 1, sparkleAlpha]);
+            
+            // Draw sparkles around token
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2 + powerup.rotation * 2;
+                const dist = powerup.width * 0.7;
+                const sparkleX = powerup.x + Math.cos(angle) * dist;
+                const sparkleY = powerup.y + Math.sin(angle) * dist;
+                const sparkleSize = (Math.sin(sparkleTime + i) * 0.5 + 0.5) * 3;
+                circleRenderer.drawCircle(sparkleX, sparkleY, sparkleSize, sparkleColor);
+            }
+            
+            // Draw token sprite with pulsing and glimmer effect
+            spriteRenderer.drawSprite(
+                tokenTexture,
+                powerup.x, powerup.y,
+                powerup.width + pulseSize, powerup.width + pulseSize, // Pulsing size
+                powerup.rotation,
+                tokenColor,
+                0.5, 0.5
+            );
+            
+            // Draw rotating shine/glint effect (bright highlight)
+            const shineAngle = powerup.rotation * 2 + powerup.pulse;
+            const shineX = powerup.x + Math.cos(shineAngle) * (powerup.width * 0.3);
+            const shineY = powerup.y + Math.sin(shineAngle) * (powerup.width * 0.3);
+            const shineSize = powerup.width * 0.4;
+            const shineAlpha = (Math.sin(powerup.pulse * 4) * 0.5 + 0.5) * 0.6;
+            const shineColor = new Float32Array([1, 1, 1, shineAlpha]);
+            circleRenderer.drawCircle(shineX, shineY, shineSize, shineColor);
+        });
+        
+        circleRenderer.end();
+        spriteRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
     powerups.forEach(powerup => {
         ctx.save();
         ctx.translate(powerup.x, powerup.y);
         ctx.rotate(powerup.rotation);
         
-        // Single color for all upgrade powerups
-        const color = '#ff00ff'; // Magenta/purple
-        const glowColor = '#ff66ff';
-        
         const pulseSize = powerup.width / 2 * (1 + Math.sin(powerup.pulse) * 0.3);
         
-        // Glow effect
+            // Glimmer effect: brightness pulse
+            const glimmer = Math.sin(powerup.pulse * 2) * 0.3 + 0.7; // 0.4 to 1.0
+            ctx.globalAlpha = glimmer;
+            
+            // Draw sparkles around token
+            const sparkleTime = powerup.pulse * 3;
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2 + powerup.rotation * 2;
+                const dist = powerup.width * 0.7;
+                const sparkleX = Math.cos(angle) * dist;
+                const sparkleY = Math.sin(angle) * dist;
+                const sparkleSize = (Math.sin(sparkleTime + i) * 0.5 + 0.5) * 3;
+                const sparkleAlpha = (Math.sin(sparkleTime) * 0.5 + 0.5) * 0.4;
+                
+                ctx.fillStyle = `rgba(255, 255, 255, ${sparkleAlpha})`;
+                ctx.shadowBlur = 5;
+                ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+                ctx.beginPath();
+                ctx.arc(sparkleX, sparkleY, sparkleSize, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw rotating shine/glint effect (bright highlight)
+            const shineAngle = powerup.rotation * 2 + powerup.pulse;
+            const shineX = Math.cos(shineAngle) * (powerup.width * 0.3);
+            const shineY = Math.sin(shineAngle) * (powerup.width * 0.3);
+            const shineSize = powerup.width * 0.4;
+            const shineAlpha = (Math.sin(powerup.pulse * 4) * 0.5 + 0.5) * 0.6;
+            
+            ctx.fillStyle = `rgba(255, 255, 255, ${shineAlpha})`;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+            ctx.beginPath();
+            ctx.arc(shineX, shineY, shineSize, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw token image if loaded
+            if (tokenImageLoaded && tokenImage) {
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = '#ff66ff';
+                ctx.drawImage(
+                    tokenImage,
+                    -(powerup.width + pulseSize) / 2,
+                    -(powerup.width + pulseSize) / 2,
+                    powerup.width + pulseSize,
+                    powerup.width + pulseSize
+                );
+            } else {
+                // Fallback drawn shape
+                const color = '#ff00ff';
+                const glowColor = '#ff66ff';
+                
         ctx.shadowBlur = 20;
         ctx.shadowColor = glowColor;
         
-        // Powerup gradient
         const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, pulseSize);
         gradient.addColorStop(0, color);
         if (color.startsWith('#')) {
@@ -3049,13 +6170,11 @@ function drawPowerups() {
         ctx.arc(0, 0, pulseSize, 0, Math.PI * 2);
         ctx.fill();
         
-        // Powerup core
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(0, 0, powerup.width / 2, 0, Math.PI * 2);
         ctx.fill();
         
-        // Icon
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 12px Arial';
         ctx.textAlign = 'center';
@@ -3066,21 +6185,57 @@ function drawPowerups() {
         else if (powerup.type === 'ammo') icon = '▲';
         else if (powerup.type === 'upgrade') icon = '★';
         ctx.fillText(icon, 0, 0);
+            }
         
         ctx.restore();
     });
+    }
 }
 
 function drawAllies() {
+    if (useWebGL && spriteRenderer) {
+        // WebGL rendering
+        spriteRenderer.begin();
+        
+        allies.forEach(ally => {
+            // Draw ally ship using sprite - only if texture is loaded
+            const allyTexture = textures.ally || null;
+            if (!allyTexture) return; // Skip drawing if texture not loaded
+            
+            const allyColor = new Float32Array([1, 1, 1, 1]); // White to show texture properly
+            
+            spriteRenderer.drawSprite(
+                allyTexture,
+                ally.x, ally.y,
+                ally.width, ally.height,
+                ally.rotation + Math.PI, // Same rotation offset as player ship
+                allyColor,
+                0.5, 0.5
+            );
+        });
+        
+        spriteRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
     allies.forEach(ally => {
         ctx.save();
         ctx.translate(ally.x, ally.y);
-        
-        // Ally glow
+            ctx.rotate(ally.rotation);
+            
+            // Draw ally ship image if loaded
+            if (allyShipImageLoaded && allyShipImage) {
+                ctx.drawImage(
+                    allyShipImage,
+                    -ally.width / 2,
+                    -ally.height / 2,
+                    ally.width,
+                    ally.height
+                );
+            } else {
+                // Fallback drawn shape
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#00ff00';
         
-        // Ally ship with gradient
         const allyGradient = ctx.createLinearGradient(-ally.width / 2, -ally.height / 2, 0, ally.height / 2);
         allyGradient.addColorStop(0, '#00aa00');
         allyGradient.addColorStop(0.5, '#00ff00');
@@ -3104,13 +6259,20 @@ function drawAllies() {
         ctx.lineTo(ally.width / 2, ally.height / 2);
         ctx.closePath();
         ctx.stroke();
+            }
         
         ctx.restore();
     });
+    }
 }
 
 function drawParticles() {
-    // Batch particles for better performance - reduce shadow operations
+    if (useWebGL && particleRenderer) {
+        // WebGL particle rendering (GPU-accelerated)
+        particleRenderer.updateParticles(particles);
+        particleRenderer.render();
+    } else if (ctx) {
+        // Canvas 2D fallback
     ctx.save();
     
     for (let i = 0; i < particles.length; i++) {
@@ -3122,7 +6284,7 @@ function drawParticles() {
         
         // Only set shadow if needed (expensive operation) - reduced blur for performance
         if (particle.glow && alpha > 0.4) {
-            ctx.shadowBlur = particle.size * 1.5 * alpha; // Reduced from 2x to 1.5x
+                ctx.shadowBlur = particle.size * 1.5 * alpha;
             ctx.shadowColor = particle.color;
         } else {
             ctx.shadowBlur = 0;
@@ -3138,7 +6300,6 @@ function drawParticles() {
         } else if (particle.color.startsWith('#')) {
             ctx.fillStyle = hexToRgba(particle.color, alpha);
         } else if (particle.color.startsWith('rgba')) {
-            // Already rgba, just update alpha
             ctx.fillStyle = particle.color.replace(/[\d.]+\)/, `${alpha})`);
         } else if (particle.color.startsWith('rgb')) {
             ctx.fillStyle = particle.color.replace('rgb', 'rgba').replace(')', `, ${alpha})`);
@@ -3152,23 +6313,26 @@ function drawParticles() {
     }
     
     ctx.restore();
+    }
 }
 
 // Mission Mode Functions
 function initMissionMode() {
     if (!canvas) return;
     
-    // Create start planet (left side)
+    // Create start planet (left side) - moved in 10% from edge
+    const canvasWidth = getCanvasWidth();
+    const offsetFromEdge = canvasWidth * 0.1; // 10% of canvas width
     startPlanet = {
-        x: 50,
+        x: 50 + offsetFromEdge,
         y: getCanvasHeight() / 2,
         radius: 80,  // Doubled from 40
         color: '#4a90e2'
     };
     
-    // Create end planet (right side)
+    // Create end planet (right side) - moved in 10% from edge
     endPlanet = {
-        x: getCanvasWidth() - 50,
+        x: canvasWidth - 50 - offsetFromEdge,
         y: getCanvasHeight() / 2,
         radius: 80,  // Doubled from 40
         color: '#e24a4a'
@@ -3271,15 +6435,92 @@ function updateCargoVessel() {
         const healRate = engineeringCrewCount * 0.5; // 0.5 HP/sec per crew
         cargoVessel.health = Math.min(cargoVessel.maxHealth, cargoVessel.health + healRate * 0.1);
     }
+    
+    // Add smoke particles when damaged (in update, not draw)
+    const cargoHealthPercent = cargoVessel.health / cargoVessel.maxHealth;
+    if (cargoHealthPercent < 0.7 && Math.random() < 0.3) {
+        const smokeX = cargoVessel.x + (Math.random() - 0.5) * cargoVessel.width * 0.8;
+        const smokeY = cargoVessel.y + (Math.random() - 0.5) * cargoVessel.height * 0.8;
+        particles.push({
+            x: smokeX,
+            y: smokeY,
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: (Math.random() - 0.5) * 0.5,
+            life: 30,
+            maxLife: 30,
+            size: 4 + Math.random() * 3,
+            color: `hsl(0, 0%, ${30 + Math.random() * 20}%)`, // Gray smoke
+            glow: false
+        });
+    }
 }
 
 function drawCargoVessel() {
     if (!cargoVessel || gameState.gameMode !== 'mission') return;
     
+    if (useWebGL && spriteRenderer) {
+        // WebGL rendering
+        spriteRenderer.begin();
+        
+        // Health bar
+        const healthPercent = cargoVessel.health / cargoVessel.maxHealth;
+        const barY = cargoVessel.y - cargoVessel.height / 2 - 15;
+        
+        spriteRenderer.drawRect(
+            cargoVessel.x - cargoVessel.width / 2 - 5, barY,
+            cargoVessel.width + 10, 8,
+            new Float32Array([0, 0, 0, 0.5])
+        );
+        
+        spriteRenderer.drawRect(
+            cargoVessel.x - cargoVessel.width / 2 - 3, barY + 2,
+            cargoVessel.width + 6, 4,
+            new Float32Array([1, 0, 0, 1])
+        );
+        
+        spriteRenderer.drawRect(
+            cargoVessel.x - cargoVessel.width / 2 - 3, barY + 2,
+            (cargoVessel.width + 6) * healthPercent, 4,
+            new Float32Array([0, 1, 0, 1])
+        );
+        
+        // Calculate rotation based on direction
+        // Cargo ship should face the direction it's traveling
+        // Same rotation offset as player ship (180 degrees)
+        let baseRotation = cargoVessel.direction === 1 ? Math.PI / 2 : -Math.PI / 2;
+        const rotation = baseRotation + Math.PI; // Add 180 degrees to fix orientation
+        
+        // Draw cargo ship with damage effects
+        const cargoTexture = textures.cargoShip || null;
+        const cargoColor = new Float32Array([0.55, 0.45, 0.33, 1]); // Brown
+        const cargoHealthPercent = cargoVessel.health / cargoVessel.maxHealth;
+        
+        // Damage effect: darken ship color based on health
+        const cargoDamageFactor = 1.0 - (1.0 - cargoHealthPercent) * 0.5; // Darken up to 50% when heavily damaged
+        const finalCargoColor = cargoTexture
+            ? new Float32Array([cargoDamageFactor, cargoDamageFactor, cargoDamageFactor, 1.0])
+            : new Float32Array([
+                cargoColor[0] * cargoDamageFactor,
+                cargoColor[1] * cargoDamageFactor,
+                cargoColor[2] * cargoDamageFactor,
+                cargoColor[3]
+            ]);
+        
+        spriteRenderer.drawSprite(
+            cargoTexture,
+            cargoVessel.x, cargoVessel.y,
+            cargoVessel.width, cargoVessel.height,
+            rotation,
+            finalCargoColor,
+            0.5, 0.5
+        );
+        
+        spriteRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
     ctx.save();
     ctx.translate(cargoVessel.x, cargoVessel.y);
     
-    // Health bar (drawn before rotation so it stays upright)
     const healthPercent = cargoVessel.health / cargoVessel.maxHealth;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(-cargoVessel.width / 2 - 5, -cargoVessel.height / 2 - 15, cargoVessel.width + 10, 8);
@@ -3288,63 +6529,82 @@ function drawCargoVessel() {
     ctx.fillStyle = 'green';
     ctx.fillRect(-cargoVessel.width / 2 - 3, -cargoVessel.height / 2 - 13, (cargoVessel.width + 6) * healthPercent, 4);
     
-    // Rotate to orient ship horizontally based on direction
-    // direction === 1: going right (towards end planet) - rotate 90 degrees
-    // direction === -1: going left (towards start planet) - rotate 270 degrees (or -90 degrees) to face left
     if (cargoVessel.direction === 1) {
-        ctx.rotate(Math.PI / 2); // 90 degrees - points right
+            ctx.rotate(Math.PI / 2);
     } else {
-        ctx.rotate(-Math.PI / 2); // -90 degrees (or 270 degrees) - points left
+            ctx.rotate(-Math.PI / 2);
     }
     
-    // Draw cargo ship image if loaded, otherwise fall back to drawn shape
     if (cargoShipImageLoaded && cargoShipImage) {
-        // Draw cargo ship image, centered
         ctx.drawImage(
             cargoShipImage,
-            -cargoVessel.width / 2,  // X position (centered)
-            -cargoVessel.height / 2, // Y position (centered)
-            cargoVessel.width,       // Width
-            cargoVessel.height       // Height
+                -cargoVessel.width / 2,
+                -cargoVessel.height / 2,
+                cargoVessel.width,
+                cargoVessel.height
         );
     } else {
-        // Fallback: Draw cargo vessel shape if image not loaded
     ctx.fillStyle = '#8b7355';
     ctx.fillRect(-cargoVessel.width / 2, -cargoVessel.height / 2, cargoVessel.width, cargoVessel.height);
-    
-    // Cargo vessel details
     ctx.fillStyle = '#6b5b45';
     ctx.fillRect(-cargoVessel.width / 2 + 5, -cargoVessel.height / 2 + 5, cargoVessel.width - 10, cargoVessel.height - 10);
-    
-    // Windows
     ctx.fillStyle = '#4a90e2';
     ctx.fillRect(-cargoVessel.width / 2 + 10, -5, 8, 8);
     ctx.fillRect(cargoVessel.width / 2 - 18, -5, 8, 8);
     }
     
     ctx.restore();
+    }
 }
 
 function drawPlanets() {
     if (gameState.gameMode !== 'mission') return;
     
-    // Draw start planet (left side) - use planet1.png
+    if (useWebGL && spriteRenderer) {
+        // WebGL rendering
+        spriteRenderer.begin();
+        
+        // Draw start planet
+        if (startPlanet) {
+            const size = startPlanet.radius * 2;
+            const planetTexture = textures.planet1 || null;
+            const planetColor = ColorUtils.parseColor(startPlanet.color);
+            spriteRenderer.drawSprite(
+                planetTexture,
+                startPlanet.x, startPlanet.y,
+                size, size,
+                0,
+                planetTexture ? null : planetColor,
+                0.5, 0.5
+            );
+        }
+        
+        // Draw end planet
+        if (endPlanet) {
+            const size = endPlanet.radius * 2;
+            const planetTexture = textures.planet2 || null;
+            const planetColor = ColorUtils.parseColor(endPlanet.color);
+            spriteRenderer.drawSprite(
+                planetTexture,
+                endPlanet.x, endPlanet.y,
+                size, size,
+                0,
+                planetTexture ? null : planetColor,
+                0.5, 0.5
+            );
+        }
+        
+        spriteRenderer.end();
+    } else if (ctx) {
+        // Canvas 2D fallback
     if (startPlanet) {
         ctx.save();
         ctx.translate(startPlanet.x, startPlanet.y);
         
         if (planet1ImageLoaded && planet1Image) {
-            // Draw planet image, centered
             const size = startPlanet.radius * 2;
-            ctx.drawImage(
-                planet1Image,
-                -startPlanet.radius,  // X position (centered)
-                -startPlanet.radius, // Y position (centered)
-                size,                // Width
-                size                 // Height
-            );
+                ctx.drawImage(planet1Image, -startPlanet.radius, -startPlanet.radius, size, size);
         } else {
-            // Fallback: Draw circle if image not loaded
         const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, startPlanet.radius);
         gradient.addColorStop(0, startPlanet.color);
         gradient.addColorStop(0.7, hexToRgba(startPlanet.color, 0.7));
@@ -3363,23 +6623,14 @@ function drawPlanets() {
         ctx.restore();
     }
     
-    // Draw end planet (right side) - use planet2.png
     if (endPlanet) {
         ctx.save();
         ctx.translate(endPlanet.x, endPlanet.y);
         
         if (planet2ImageLoaded && planet2Image) {
-            // Draw planet image, centered
             const size = endPlanet.radius * 2;
-            ctx.drawImage(
-                planet2Image,
-                -endPlanet.radius,  // X position (centered)
-                -endPlanet.radius, // Y position (centered)
-                size,              // Width
-                size               // Height
-            );
+                ctx.drawImage(planet2Image, -endPlanet.radius, -endPlanet.radius, size, size);
         } else {
-            // Fallback: Draw circle if image not loaded
         const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, endPlanet.radius);
         gradient.addColorStop(0, endPlanet.color);
         gradient.addColorStop(0.7, hexToRgba(endPlanet.color, 0.7));
@@ -3396,6 +6647,7 @@ function drawPlanets() {
         }
         
         ctx.restore();
+        }
     }
 }
 
@@ -3420,6 +6672,11 @@ function missionFailed() {
     gameState.running = false;
     document.getElementById('finalScore').textContent = gameState.score;
     document.getElementById('gameOver').classList.remove('hidden');
+    
+    // Handle episode end for training (when autopilot is on)
+    if (autopilotEnabled && rlAgent instanceof PPOAgent) {
+        handleEpisodeEnd();
+    }
 }
 
 // Crew Management
@@ -3574,6 +6831,17 @@ function updateCommandModuleUI() {
         buyCargoShipBtn.disabled = currency < cargoShipPrice;
     }
     
+    // Update Nebuclear device
+    const nebuclearStoreItem = document.getElementById('nebuclearStoreItem');
+    if (nebuclearStoreItem) {
+        nebuclearStoreItem.style.display = hasNebuclear ? 'none' : 'block'; // Hide if already purchased
+    }
+    
+    const buyNebuclearBtn = document.getElementById('buyNebuclearBtn');
+    if (buyNebuclearBtn) {
+        buyNebuclearBtn.disabled = currency < 400 || hasNebuclear;
+    }
+    
     // Show/hide cargo ship crew section based on game mode
     const cargoCrewSection = document.getElementById('cargoShipCrew');
     if (cargoCrewSection) {
@@ -3610,11 +6878,27 @@ function updateCommandModuleUI() {
             crewAllocation[station].forEach(crew => {
                 const crewEl = document.createElement('div');
                 crewEl.className = 'crew-member';
-                crewEl.textContent = crew.id + 1;
                 crewEl.draggable = true;
                 crewEl.dataset.crewId = crew.id;
                 crewEl.dataset.station = station;
                 crewEl.dataset.ship = 'player';
+                
+                // Use crew.png or crew1.png image if loaded, otherwise fall back to text
+                // Alternate between crew.png (even IDs) and crew1.png (odd IDs)
+                const useCrew1 = crew.id % 2 === 1;
+                const imageToUse = useCrew1 ? (crew1ImageLoaded && crew1Image ? 'crew1.png' : null) : (crewImageLoaded && crewImage ? 'crew.png' : null);
+                
+                if (imageToUse) {
+                    const img = document.createElement('img');
+                    img.src = imageToUse;
+                    img.style.width = '100%';
+                    img.style.height = '100%';
+                    img.style.objectFit = 'contain';
+                    crewEl.appendChild(img);
+                } else {
+                    crewEl.textContent = crew.id + 1;
+                }
+                
                 crewEl.addEventListener('dragstart', (e) => startCrewDrag(e, crew.id, station, 'player'));
                 // Add touch support for mobile
                 crewEl.addEventListener('touchstart', (e) => startCrewTouchDrag(e, crew.id, station, 'player'), { passive: false });
@@ -3639,10 +6923,22 @@ function updateCommandModuleUI() {
         }).forEach(crew => {
             const crewEl = document.createElement('div');
             crewEl.className = 'crew-member';
-            crewEl.textContent = crew.id + 1;
             crewEl.draggable = true;
             crewEl.dataset.crewId = crew.id;
             crewEl.dataset.ship = 'player';
+            
+            // Use crew.png image if loaded, otherwise fall back to text
+            if (crewImageLoaded && crewImage) {
+                const img = document.createElement('img');
+                img.src = 'crew.png';
+                img.style.width = '100%';
+                img.style.height = '100%';
+                img.style.objectFit = 'contain';
+                crewEl.appendChild(img);
+            } else {
+                crewEl.textContent = crew.id + 1;
+            }
+            
             crewEl.addEventListener('dragstart', (e) => startCrewDrag(e, crew.id, null, 'player'));
             // Add touch support for mobile
             crewEl.addEventListener('touchstart', (e) => startCrewTouchDrag(e, crew.id, null, 'player'), { passive: false });
@@ -3666,11 +6962,27 @@ function updateCommandModuleUI() {
             cargoCrewAllocation.engineering.forEach(crew => {
                 const crewEl = document.createElement('div');
                 crewEl.className = 'crew-member';
-                crewEl.textContent = crew.id + 1;
                 crewEl.draggable = true;
                 crewEl.dataset.crewId = crew.id;
                 crewEl.dataset.station = 'engineering';
                 crewEl.dataset.ship = 'cargo';
+                
+                // Use crew.png or crew1.png image if loaded, otherwise fall back to text
+                // Alternate between crew.png (even IDs) and crew1.png (odd IDs)
+                const useCrew1 = crew.id % 2 === 1;
+                const imageToUse = useCrew1 ? (crew1ImageLoaded && crew1Image ? 'crew1.png' : null) : (crewImageLoaded && crewImage ? 'crew.png' : null);
+                
+                if (imageToUse) {
+                    const img = document.createElement('img');
+                    img.src = imageToUse;
+                    img.style.width = '100%';
+                    img.style.height = '100%';
+                    img.style.objectFit = 'contain';
+                    crewEl.appendChild(img);
+                } else {
+                    crewEl.textContent = crew.id + 1;
+                }
+                
                 crewEl.addEventListener('dragstart', (e) => startCrewDrag(e, crew.id, 'engineering', 'cargo'));
                 // Add touch support for mobile
                 crewEl.addEventListener('touchstart', (e) => startCrewTouchDrag(e, crew.id, 'engineering', 'cargo'), { passive: false });
@@ -3692,11 +7004,27 @@ function updateCommandModuleUI() {
             cargoCrewAllocation.navigation.forEach(crew => {
                 const crewEl = document.createElement('div');
                 crewEl.className = 'crew-member';
-                crewEl.textContent = crew.id + 1;
                 crewEl.draggable = true;
                 crewEl.dataset.crewId = crew.id;
                 crewEl.dataset.station = 'navigation';
                 crewEl.dataset.ship = 'cargo';
+                
+                // Use crew.png or crew1.png image if loaded, otherwise fall back to text
+                // Alternate between crew.png (even IDs) and crew1.png (odd IDs)
+                const useCrew1 = crew.id % 2 === 1;
+                const imageToUse = useCrew1 ? (crew1ImageLoaded && crew1Image ? 'crew1.png' : null) : (crewImageLoaded && crewImage ? 'crew.png' : null);
+                
+                if (imageToUse) {
+                    const img = document.createElement('img');
+                    img.src = imageToUse;
+                    img.style.width = '100%';
+                    img.style.height = '100%';
+                    img.style.objectFit = 'contain';
+                    crewEl.appendChild(img);
+                } else {
+                    crewEl.textContent = crew.id + 1;
+                }
+                
                 crewEl.addEventListener('dragstart', (e) => startCrewDrag(e, crew.id, 'navigation', 'cargo'));
                 // Add touch support for mobile
                 crewEl.addEventListener('touchstart', (e) => startCrewTouchDrag(e, crew.id, 'navigation', 'cargo'), { passive: false });
@@ -3713,10 +7041,26 @@ function updateCommandModuleUI() {
             cargoCrewMembers.filter(c => !c.station).forEach(crew => {
                 const crewEl = document.createElement('div');
                 crewEl.className = 'crew-member';
-                crewEl.textContent = crew.id + 1;
                 crewEl.draggable = true;
                 crewEl.dataset.crewId = crew.id;
                 crewEl.dataset.ship = 'cargo';
+                
+                // Use crew.png or crew1.png image if loaded, otherwise fall back to text
+                // Alternate between crew.png (even IDs) and crew1.png (odd IDs)
+                const useCrew1 = crew.id % 2 === 1;
+                const imageToUse = useCrew1 ? (crew1ImageLoaded && crew1Image ? 'crew1.png' : null) : (crewImageLoaded && crewImage ? 'crew.png' : null);
+                
+                if (imageToUse) {
+                    const img = document.createElement('img');
+                    img.src = imageToUse;
+                    img.style.width = '100%';
+                    img.style.height = '100%';
+                    img.style.objectFit = 'contain';
+                    crewEl.appendChild(img);
+                } else {
+                    crewEl.textContent = crew.id + 1;
+                }
+                
                 crewEl.addEventListener('dragstart', (e) => startCrewDrag(e, crew.id, null, 'cargo'));
                 // Add touch support for mobile
                 crewEl.addEventListener('touchstart', (e) => startCrewTouchDrag(e, crew.id, null, 'cargo'), { passive: false });
@@ -3756,6 +7100,15 @@ function buyCargoShip() {
         // Spawn new cargo vessel
         spawnCargoVessel();
         
+        updateCommandModuleUI();
+        updateUI();
+    }
+}
+
+function buyNebuclear() {
+    if (currency >= 400 && !hasNebuclear) {
+        currency -= 400;
+        hasNebuclear = true;
         updateCommandModuleUI();
         updateUI();
     }
@@ -3925,12 +7278,21 @@ function setupCrewDragAndDrop() {
     ['shields', 'engineering', 'weapons', 'navigation'].forEach(station => {
         const stationEl = document.querySelector(`[data-station="${station}"]`);
         if (stationEl) {
+            const slotsEl = stationEl.querySelector('.crew-slots');
             stationEl.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
+                stationEl.classList.add('drag-over');
+                if (slotsEl) slotsEl.classList.add('drag-over');
+            });
+            stationEl.addEventListener('dragleave', (e) => {
+                stationEl.classList.remove('drag-over');
+                if (slotsEl) slotsEl.classList.remove('drag-over');
             });
             stationEl.addEventListener('drop', (e) => {
                 e.preventDefault();
+                stationEl.classList.remove('drag-over');
+                if (slotsEl) slotsEl.classList.remove('drag-over');
                 const data = e.dataTransfer.getData('text/plain');
                 if (data) {
                     try {
@@ -4361,37 +7723,79 @@ function setupMobileControls() {
 let lastSpawn = 0;
 let lastAsteroidSpawn = 0;
 let lastNebulaSpawn = 0;
+let lastBossSpawnScore = 0; // Track score when last boss was spawned
+let lastFrameTime = performance.now();
+const TARGET_FPS = 60; // Target frames per second
+const FRAME_TIME_MS = 1000 / TARGET_FPS; // ~16.67ms per frame at 60fps
+let accumulatedTime = 0;
 
-function gameLoop() {
-    if (!gameState.running || !canvas || !ctx) return;
+function gameLoop(currentTime = performance.now()) {
+    if (!canvas) {
+        console.error('Canvas not available in gameLoop');
+        return;
+    }
+    
+    // Calculate delta time
+    const deltaTime = currentTime - lastFrameTime;
+    lastFrameTime = currentTime;
+    
+    // Allow loop to run even if gameState.running is false (for rendering UI/briefing)
+    // But skip updates if not running
+    if (!gameState.running) {
+        // Still render the briefing/UI, but don't update game logic
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+    
+    // Check rendering context (WebGL or Canvas 2D)
+    if (!useWebGL && !ctx) {
+        console.warn('No rendering context available');
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+
+    // Reset per-frame tracking variables
+    asteroidsDestroyedThisStep = 0;
+    powerupsCollectedThisStep = 0;
+    upgradesSelectedThisStep = 0;
+    tractorBeamActivatedThisStep = false;
 
     try {
-        // Draw starfield
-        drawStarfield();
+        // Skip rendering in headless mode for speed (but allow observer mode)
+        if (!HEADLESS_MODE || OBSERVER_MODE) {
+            // Draw starfield
+            drawStarfield();
+        }
 
         // Only update game logic if not paused
         if (!gameState.paused) {
-            // Update
-            updatePlayer();
-            updateTractorBeam();
-            updateBullets();
-            updateEnemies();
-            updateAsteroids();
-            updateNebulas();
-            updatePowerups();
-            updateAllies();
-            updateParticles();
-            updateEnemyBullets();
-            updateFireworks();
-            
-            // Mission mode updates
-            if (gameState.gameMode === 'mission') {
-                updateCargoVessel();
+            // Accumulate time for fixed timestep updates
+            // In headless mode, run multiple steps per frame for speed
+            // In normal mode, use fixed timestep to maintain consistent game speed
+            if (HEADLESS_MODE && !OBSERVER_MODE) {
+                // Headless mode: run multiple steps per frame
+                const steps = Math.floor(SPEED_MULTIPLIER);
+            for (let step = 0; step < steps; step++) {
+                    updateGameStep();
+                }
+            } else {
+                // Normal mode: use fixed timestep to maintain consistent speed
+                accumulatedTime += deltaTime;
+                
+                // Cap accumulated time to prevent spiral of death
+                const maxFrameTime = FRAME_TIME_MS * 5; // Max 5 frames worth
+                if (accumulatedTime > maxFrameTime) {
+                    accumulatedTime = maxFrameTime;
+                }
+                
+                // Run updates in fixed timestep chunks
+                while (accumulatedTime >= FRAME_TIME_MS) {
+                    updateGameStep();
+                    accumulatedTime -= FRAME_TIME_MS;
+                }
             }
             
-            updateUI();
-
-            // Spawning
+            // Spawning (time-based, not frame-based)
             const now = Date.now();
             // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
             const creditDifficulty = cumulativeCredits / 100;
@@ -4434,6 +7838,12 @@ function gameLoop() {
                 lastNebulaSpawn = now;
             }
 
+            // Spawn boss every 1000 points (only one boss at a time)
+            if (bosses.length === 0 && gameState.score >= lastBossSpawnScore + 1000) {
+                spawnBoss();
+                lastBossSpawnScore = gameState.score;
+            }
+
             // Level progression - faster (fewer kills needed)
             if (gameState.enemiesKilled >= gameState.level * 7) {
                 gameState.level++;
@@ -4447,30 +7857,63 @@ function gameLoop() {
             }
         } else {
             // Still update UI when paused (for visual feedback)
-            updateUI();
+            if (!HEADLESS_MODE || OBSERVER_MODE) {
+                updateUI();
+            }
         }
 
-        // Always draw game objects (even when paused)
-        drawPlanets();
-        drawNebulas(); // Draw nebulas behind other objects
-        drawParticles();
-        drawFireworks(); // Draw fireworks (for high score celebration)
-        drawAsteroids();
-        drawEnemies();
-        drawTractorBeam(); // Draw tractor beam
-        drawPowerups();
-        drawAllies();
-        drawBullets();
-        if (gameState.gameMode === 'mission') {
-            drawCargoVessel();
+        // Skip all rendering in headless mode for maximum speed (but allow observer mode)
+        if (!HEADLESS_MODE || OBSERVER_MODE) {
+            // Always draw game objects (even when paused)
+            drawPlanets();
+            drawNebulas(); // Draw nebulas behind other objects
+            drawParticles();
+            drawFireworks(); // Draw fireworks (for high score celebration)
+            drawAsteroids();
+            drawEnemies();
+            drawBosses();
+            drawTractorBeam(); // Draw tractor beam
+            drawPowerups();
+            drawAllies();
+            drawBullets();
+            if (gameState.gameMode === 'mission') {
+                drawCargoVessel();
+            }
+            drawPlayer();
         }
-        drawPlayer();
     } catch (error) {
         console.error('Game loop error:', error);
         // Continue the loop even if there's an error
     }
 
     requestAnimationFrame(gameLoop);
+}
+
+// Helper function to update game logic in one step
+function updateGameStep() {
+    // Update
+    updatePlayer();
+    updateTractorBeam();
+    updateBullets();
+    updateEnemies();
+    updateBosses();
+    updateAsteroids();
+    updateNebulas();
+    updatePowerups();
+    updateAllies();
+    updateParticles();
+    updateEnemyBullets();
+    updateFireworks();
+    
+    // Mission mode updates
+    if (gameState.gameMode === 'mission') {
+        updateCargoVessel();
+    }
+    
+    // Update UI (skip in headless mode, but allow observer mode)
+    if (!HEADLESS_MODE || OBSERVER_MODE) {
+        updateUI();
+    }
 }
 
 function gameOver() {
@@ -4517,20 +7960,17 @@ function gameOver() {
         }
     }
     document.getElementById('gameOver').classList.remove('hidden');
-}
-
-function startNormalMode() {
-    gameState.gameMode = 'normal';
-    gameState.missionComplete = false;
-    gameState.journeyCount = 0;
-    currency = 0; // Reset currency when switching modes
-    cargoVessels = [];
-    cargoShipCount = 0;
-    cargoShipPrice = 2000; // Reset to base price
-    startPlanet = null;
-    endPlanet = null;
-    document.getElementById('modeSelect').classList.add('hidden');
+    
+    // Auto-restart if autopilot is enabled (after 5 seconds)
+    if (autopilotEnabled) {
+        setTimeout(() => {
+            document.getElementById('gameOver').classList.add('hidden');
     restartGame();
+            if (rlAgent instanceof PPOAgent) {
+                startNewEpisode();
+            }
+        }, 5000); // 5 seconds
+    }
 }
 
 function startMissionMode() {
@@ -4538,14 +7978,17 @@ function startMissionMode() {
     gameState.missionComplete = false;
     gameState.journeyCount = 0;
     currency = 0; // Start with 0 currency in mission mode
-    document.getElementById('modeSelect').classList.add('hidden');
+    const briefing = document.getElementById('missionBriefing');
+    if (briefing) {
+        briefing.classList.add('hidden');
+    }
     restartGame();
     initMissionMode();
 }
 
 function restartGame() {
     // Reset game state (preserve game mode)
-    const currentMode = gameState.gameMode || 'normal';
+    const currentMode = gameState.gameMode || 'mission';
     gameState = {
         running: true,
         paused: false,
@@ -4635,20 +8078,115 @@ function restartGame() {
     gameLoop();
 }
 
-// Mode selection function
-function showModeSelect() {
+// Mission briefing overlay
+function showMissionBriefing() {
     gameState.running = false;
-    document.getElementById('modeSelect').classList.remove('hidden');
+    const briefing = document.getElementById('missionBriefing');
+    if (briefing) {
+        briefing.classList.remove('hidden');
+    }
     document.getElementById('gameOver').classList.add('hidden');
     document.getElementById('missionComplete').classList.add('hidden');
 }
 
 // Initialize and start game
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        console.log('Game initializing...');
     canvas = document.getElementById('gameCanvas');
-    ctx = canvas.getContext('2d');
     
-    // Set up canvas with proper device pixel ratio
+    if (!canvas) {
+        console.error('Canvas element not found!');
+        return;
+    }
+    
+    // Set up canvas with proper device pixel ratio FIRST (before WebGL init)
+    // This ensures canvas has proper dimensions
+    displayWidth = window.innerWidth;
+    displayHeight = window.innerHeight;
+    if (canvas) {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = displayWidth * dpr;
+        canvas.height = displayHeight * dpr;
+        canvas.style.width = displayWidth + 'px';
+        canvas.style.height = displayHeight + 'px';
+    }
+    
+    // Try to initialize WebGL (skip in headless mode unless observer mode)
+    if (!HEADLESS_MODE || OBSERVER_MODE) {
+        try {
+            webglRenderer = new WebGLRenderer(canvas);
+            if (webglRenderer.init()) {
+                useWebGL = true;
+                console.log('WebGL initialized successfully');
+                
+                // IMPORTANT: Resize WebGL renderer to match canvas BEFORE creating renderers
+                // This ensures the projection matrix is correct from the start
+                webglRenderer.resize(displayWidth, displayHeight);
+                
+                // Initialize renderers with the correct projection matrix
+                try {
+                    const gl = webglRenderer.getContext();
+                    const shaderManager = webglRenderer.shaderManager;
+                    const bufferManager = webglRenderer.bufferManager;
+                    const projectionMatrix = webglRenderer.getProjectionMatrix();
+                    
+                    console.log('Creating renderers with projection matrix for', displayWidth, 'x', displayHeight);
+                    console.log('Projection matrix:', projectionMatrix);
+                    
+                    spriteRenderer = new SpriteRenderer(gl, shaderManager, bufferManager, projectionMatrix);
+                    spriteRenderer.textureManager = webglRenderer.textureManager; // Set texture manager reference
+                    particleRenderer = new ParticleRenderer(gl, shaderManager, bufferManager, projectionMatrix);
+                    trailRenderer = new TrailRenderer(gl, shaderManager, bufferManager, projectionMatrix);
+                    circleRenderer = new CircleRenderer(gl, shaderManager, bufferManager, projectionMatrix);
+                    nebulaRenderer = new NebulaRenderer(gl, shaderManager, bufferManager, projectionMatrix);
+                    
+                // Load textures
+                await loadTextures();
+                
+                // Set up context restore handler to reload textures
+                webglRenderer.onContextRestored = async () => {
+                    console.log('Reloading textures after context restore...');
+                    await loadTextures();
+                };
+                } catch (rendererError) {
+                    console.error('Error initializing WebGL renderers:', rendererError);
+                    useWebGL = false;
+    ctx = canvas.getContext('2d');
+                }
+            } else {
+                console.warn('WebGL not available, falling back to Canvas 2D');
+                ctx = canvas.getContext('2d');
+            }
+        } catch (webglError) {
+            console.error('Error initializing WebGL:', webglError);
+            useWebGL = false;
+            ctx = canvas.getContext('2d');
+        }
+    } else {
+        // Headless mode - no rendering needed
+        ctx = null;
+    }
+    
+    // Fallback to Canvas 2D if WebGL not available
+    if (!useWebGL && !HEADLESS_MODE) {
+        if (!ctx) {
+            ctx = canvas.getContext('2d');
+        }
+        if (ctx) {
+            const dpr = window.devicePixelRatio || 1;
+            ctx.scale(dpr, dpr);
+        }
+    }
+    
+    // Preload RL agent in background so it's ready when autopilot is toggled
+    // This prevents delay on first autopilot click
+    agentLoadPromise = loadRLAgent().catch(err => {
+        console.warn('Failed to preload RL agent (will load on autopilot toggle):', err);
+    });
+    
+    // Set up canvas with proper device pixel ratio (update projection matrices)
+    // This ensures projection matrices are updated if window was resized
     setupCanvas();
     
     // Initialize player position (use display size, not internal canvas size)
@@ -4660,6 +8198,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize player ship image
     initPlayerShipImage();
+    initDamagedPlayerShipImage();
     
     // Initialize planet images
     initPlanetImages();
@@ -4669,6 +8208,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize enemy ship image
     initEnemyShipImage();
+    initBossShipImage();
+    initAllyShipImage();
+    initTokenImage();
+    initCrewImage();
     
     // Load high score
     loadHighScore();
@@ -4746,6 +8289,40 @@ document.addEventListener('DOMContentLoaded', () => {
         musicToggle.title = musicEnabled ? 'Toggle Music (On)' : 'Toggle Music (Off)';
     }
     
+    // Set up autopilot toggle button
+    const autopilotToggle = document.getElementById('autopilotToggle');
+    if (autopilotToggle) {
+        let lastToggleTime = 0;
+        autopilotToggle.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Prevent rapid clicking (debounce)
+            const now = Date.now();
+            if (now - lastToggleTime < 300) {
+                console.log('Click ignored - too soon after last toggle');
+                return;
+            }
+            lastToggleTime = now;
+            
+            console.log('Autopilot button clicked, current state:', autopilotEnabled);
+            
+            try {
+                await toggleAutopilot();
+                console.log('Autopilot toggled successfully, new state:', autopilotEnabled);
+            } catch (error) {
+                console.error('Error toggling autopilot:', error);
+                // Reset on error
+                lastToggleTime = 0;
+            }
+        });
+        updateAutopilotUI();
+        console.log('Autopilot toggle button set up successfully');
+    } else {
+        console.error('Autopilot toggle button not found in DOM!');
+    }
+    
+    
     // Set up button event listeners
     const restartBtn = document.getElementById('restartBtn');
     if (restartBtn) {
@@ -4756,8 +8333,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (missionRestartBtn) {
         missionRestartBtn.addEventListener('click', () => {
         document.getElementById('missionComplete').classList.add('hidden');
-        showModeSelect();
-    });
+            startMissionMode();
+        });
     }
     
     const closeUpgradeBtn = document.getElementById('closeUpgrade');
@@ -4826,15 +8403,15 @@ document.addEventListener('DOMContentLoaded', () => {
         buyCargoShipBtn.addEventListener('click', buyCargoShip);
     }
     
-    // Mode selection buttons
-    const normalModeBtn = document.getElementById('normalModeBtn');
-    if (normalModeBtn) {
-        normalModeBtn.addEventListener('click', startNormalMode);
+    const buyNebuclearBtn = document.getElementById('buyNebuclearBtn');
+    if (buyNebuclearBtn) {
+        buyNebuclearBtn.addEventListener('click', buyNebuclear);
     }
     
-    const missionModeBtn = document.getElementById('missionModeBtn');
-    if (missionModeBtn) {
-        missionModeBtn.addEventListener('click', startMissionMode);
+    // Mission briefing start button
+    const startMissionBtn = document.getElementById('startMissionBtn');
+    if (startMissionBtn) {
+        startMissionBtn.addEventListener('click', startMissionMode);
     }
     
     // Mobile control buttons
@@ -4851,10 +8428,34 @@ document.addEventListener('DOMContentLoaded', () => {
         finalHighScoreEl.textContent = highScore;
     }
     
-    // Show mode selection on start
-    showModeSelect();
+    // Handle agent loading
+    if (agentLoadPromise) {
+    agentLoadPromise.finally(() => {
+            console.log('RL agent loaded, starting game...');
+        if (OFFLINE_MODE) {
+            startMissionMode();
+            autopilotEnabled = true;
+            updateAutopilotUI();
+            startNewEpisode();
+            setupOfflineAPI();
+        } else {
+            showMissionBriefing();
+        }
+        }).catch(error => {
+            console.error('Error in agent load promise:', error);
+        });
+    } else {
+        // No agent promise, just show briefing
+        if (!OFFLINE_MODE) {
+            showMissionBriefing();
+        }
+    }
     
     // Start game loop
+        console.log('Starting game loop...');
     gameLoop();
+    } catch (error) {
+        console.error('Fatal error during game initialization:', error);
+        alert('Game failed to initialize. Check console for details.');
+    }
 });
-

@@ -1,0 +1,13 @@
+{
+  "name": "asteroid-droid",
+  "version": "1.0.0",
+  "description": "Asteroid Droid offline training utilities",
+  "scripts": {
+    "offline-train": "node offline_training.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "puppeteer": "^21.6.0"
+  }
+}
+
