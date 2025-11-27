@@ -5547,8 +5547,13 @@ function drawRemotePlayers() {
         });
         
         spriteRenderer.end();
-        } else if (ctx) {
-            // Canvas 2D rendering for remote player
+    } else if (ctx) {
+        // Canvas 2D rendering for remote players
+        remotePlayersList.forEach(remotePlayer => {
+            if (!remotePlayer || isNaN(remotePlayer.x) || isNaN(remotePlayer.y)) {
+                return;
+            }
+            
             ctx.save();
             ctx.translate(remotePlayer.x, remotePlayer.y);
             ctx.rotate(remotePlayer.rotation || 0);
@@ -5605,8 +5610,8 @@ function drawRemotePlayers() {
             }
             
             ctx.restore();
-        }
-    });
+        });
+    }
 }
 
 // Multiplayer UI setup
