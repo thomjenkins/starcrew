@@ -5498,27 +5498,28 @@ function drawRemotePlayers() {
     if (remotePlayersList.length === 0) return;
     
     if (useWebGL && spriteRenderer) {
-        // WebGL rendering - begin once for all remote players
-        spriteRenderer.begin();
-        
         remotePlayersList.forEach(remotePlayer => {
             if (!remotePlayer || isNaN(remotePlayer.x) || isNaN(remotePlayer.y)) {
                 console.warn('Invalid remote player data:', remotePlayer);
                 return;
             }
             
-            // Health bar
+            // Health bar - draw in separate batch to ensure it's visible
+            spriteRenderer.begin();
+            
             const healthPercent = (remotePlayer.health || 100) / (remotePlayer.maxHealth || 100);
             const barWidth = player.width + 10;
             const barHeight = 4;
             const barY = remotePlayer.y - player.height / 2 - 15;
             
+            // Health bar background
             spriteRenderer.drawRect(
                 remotePlayer.x - barWidth / 2, barY,
                 barWidth, barHeight,
                 new Float32Array([0, 0, 0, 0.6])
             );
             
+            // Health bar fill (green to red)
             const healthR = healthPercent > 0.5 ? (1 - (healthPercent - 0.5) * 2) : 1;
             const healthG = healthPercent > 0.5 ? 1 : healthPercent * 2;
             spriteRenderer.drawRect(
@@ -5527,10 +5528,11 @@ function drawRemotePlayers() {
                 new Float32Array([healthR, healthG, 0, 1])
             );
             
-            // Draw remote player ship with orange circle indicator (like shield)
+            spriteRenderer.end();
+            
+            // Draw orange circle indicator (like shield)
             const indicatorRadius = player.width / 2 + 18; // Same size as shield
             
-            // Draw orange circle indicator (two rings like the shield)
             circleRenderer.begin();
             
             // Outer ring - thicker, softer glow
@@ -5558,8 +5560,6 @@ function drawRemotePlayers() {
                 spriteRenderer.end();
             }
         });
-        
-        spriteRenderer.end();
     } else if (ctx) {
         // Canvas 2D rendering for remote players
         remotePlayersList.forEach(remotePlayer => {
