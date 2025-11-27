@@ -869,6 +869,7 @@ body {
     padding: 12px 20px;
     font-size: 16px;
     font-weight: bold;
+    font-family: 'Orbitron', 'Arial', sans-serif;
     background: linear-gradient(135deg, rgba(255, 200, 0, 0.9), rgba(255, 150, 0, 0.9));
     color: white;
     border: 2px solid rgba(255, 220, 0, 0.8);
@@ -899,6 +900,7 @@ body {
 
 .weapon-label {
     font-size: 14px;
+    font-family: 'Orbitron', 'Arial', sans-serif;
 }
 
 .weapon-ammo {
@@ -913,6 +915,7 @@ body {
     padding: 15px 25px;
     font-size: 18px;
     font-weight: bold;
+    font-family: 'Orbitron', 'Arial', sans-serif;
     background: linear-gradient(135deg, rgba(0, 255, 0, 0.9), rgba(0, 200, 0, 0.9));
     color: white;
     border: 2px solid rgba(0, 255, 136, 0.8);
@@ -979,6 +982,7 @@ body {
     border-radius: 10px;
     color: #aa66ff;
     font-size: 16px;
+    font-family: 'Orbitron', 'Arial', sans-serif;
     font-weight: bold;
     cursor: pointer;
     transition: all 0.3s;
