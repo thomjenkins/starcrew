@@ -1239,20 +1239,30 @@ function updatePlayer() {
     const weaponsCrewCount = crewAllocation.weapons.length;
     const cooldownMultiplier = Math.max(0.1, 1 - (weaponsCrewCount * crewEffects.weapons.cooldownReduction));
     
-    // Decrement cooldowns: base decrease is 1 per frame
-    // With crew, cooldownMultiplier < 1, so we decrease faster (divide by multiplier)
-    // Example: cooldownMultiplier = 0.9 means 10% faster = decrease by 1/0.9 = 1.11 per frame
     Object.keys(weapons).forEach(weapon => {
         if (weapons[weapon].cooldown > 0) {
-            // Always decrease by at least 1, faster with crew
+            // Base decrease is 1 per frame
+            // With crew, cooldownMultiplier < 1, so we decrease faster
+            // When no crew: cooldownMultiplier = 1, so decrease = 1
+            // With crew: cooldownMultiplier < 1, so decrease = 1 / cooldownMultiplier > 1
             const decreaseAmount = 1 / cooldownMultiplier;
+            const oldCooldown = weapons[weapon].cooldown;
             weapons[weapon].cooldown = Math.max(0, weapons[weapon].cooldown - decreaseAmount);
+            // Debug: Log cooldown changes for primary weapon
+            if (weapon === 'primary' && oldCooldown !== weapons[weapon].cooldown) {
+                console.log(`Cooldown: ${oldCooldown.toFixed(2)} -> ${weapons[weapon].cooldown.toFixed(2)}, multiplier: ${cooldownMultiplier.toFixed(2)}, decrease: ${decreaseAmount.toFixed(2)}`);
+            }
         }
     });
 
     // Shooting (deterministic lockstep - both players process their own shooting)
     // Mouse button or spacebar for primary weapon
     if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0) {
+        console.log('Shooting! Cooldown was:', weapons.primary.cooldown, 'maxCooldown:', weapons.primary.maxCooldown);
+        // Debug: Log cooldown before shooting
+        if (weapons.primary.cooldown !== 0) {
+            console.log('WARNING: Shooting with non-zero cooldown!', weapons.primary.cooldown);
+        }
         shoot('primary');
     }
     if (keys['1'] && weapons.missile.cooldown === 0 && weapons.missile.ammo > 0) {
@@ -1317,6 +1327,7 @@ function shoot(weaponType) {
 
     // Set cooldown IMMEDIATELY to prevent rapid-fire spam
     // This must happen before any other logic to ensure rate limiting
+    console.log('Setting cooldown to:', weapon.maxCooldown, 'from:', weapon.cooldown);
     weapon.cooldown = weapon.maxCooldown;
     if (weapon.ammo !== Infinity) weapon.ammo--;
     
