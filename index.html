@@ -9,6 +9,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
 </head>
 <body>
     <div id="gameContainer">
@@ -163,6 +166,21 @@
                 </div>
             </div>
             <button id="startMissionBtn" class="mode-btn">Get Started</button>
+            <div class="multiplayer-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(0, 150, 255, 0.3);">
+                <h3 style="color: #66aaff; margin-bottom: 15px;">Multiplayer</h3>
+                <div id="multiplayerControls" style="display: flex; flex-direction: column; gap: 10px; max-width: 400px; margin: 0 auto;">
+                    <button id="createRoomBtn" class="mode-btn" style="background: linear-gradient(135deg, rgba(0, 255, 0, 0.3), rgba(0, 200, 0, 0.3)); border-color: rgba(0, 255, 136, 0.8);">Create Room</button>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="roomIdInput" placeholder="Enter Room ID" style="flex: 1; padding: 10px; background: rgba(0, 30, 80, 0.4); border: 1px solid rgba(0, 120, 255, 0.3); border-radius: 5px; color: #fff; font-family: 'Orbitron', sans-serif;">
+                        <button id="joinRoomBtn" class="mode-btn" style="background: linear-gradient(135deg, rgba(0, 150, 255, 0.3), rgba(0, 100, 200, 0.3)); border-color: rgba(0, 150, 255, 0.8);">Join Room</button>
+                    </div>
+                    <div id="roomInfo" class="hidden" style="padding: 10px; background: rgba(0, 50, 100, 0.3); border-radius: 5px; margin-top: 10px;">
+                        <p style="margin: 5px 0; color: #66aaff;">Room ID: <span id="displayRoomId" style="font-weight: bold;"></span></p>
+                        <p style="margin: 5px 0; color: #ccc;">Players: <span id="playerCount">1</span></p>
+                        <button id="leaveRoomBtn" class="mode-btn" style="margin-top: 10px; background: linear-gradient(135deg, rgba(255, 0, 0, 0.3), rgba(200, 0, 0, 0.3)); border-color: rgba(255, 0, 0, 0.8);">Leave Room</button>
+                    </div>
+                </div>
+            </div>
         </div>
         <div id="missionComplete" class="hidden">
             <h2>Mission Complete!</h2>

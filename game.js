@@ -6,6 +6,7 @@ import { TrailRenderer } from './src/rendering/webgl/TrailRenderer.js';
 import { CircleRenderer } from './src/rendering/webgl/CircleRenderer.js';
 import { NebulaRenderer } from './src/rendering/webgl/NebulaRenderer.js';
 import { ColorUtils } from './src/rendering/webgl/utils/ColorUtils.js';
+import { NetworkManager } from './src/networking/NetworkManager.js';
 
 let canvas;
 let ctx;
@@ -225,6 +226,22 @@ function initCrewImage() {
     };
     crew1Image.src = 'crew1.png';
 }
+
+// Multiplayer
+let networkManager = null;
+let remotePlayers = new Map(); // Other players: {id: {x, y, rotation, health, shields, ...}}
+let multiplayerMode = false;
+
+// Firebase configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyAous8FY2fZt22snGzuWx1eg9c68txlU1k",
+    authDomain: "asteroiddroidgame.firebaseapp.com",
+    databaseURL: "https://asteroiddroidgame-default-rtdb.firebaseio.com",
+    projectId: "asteroiddroidgame",
+    storageBucket: "asteroiddroidgame.firebasestorage.app",
+    messagingSenderId: "459886890264",
+    appId: "1:459886890264:web:62e706c0ae9e0fbe76626d"
+};
 
 // Player
 let player = {
@@ -1162,6 +1179,20 @@ function updatePlayer() {
     }
     if (keys['3'] && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
         shoot('cluster');
+    }
+    
+    // Send player state to network if in multiplayer mode
+    if (multiplayerMode && networkManager && networkManager.isConnected()) {
+        networkManager.sendPlayerState({
+            x: player.x,
+            y: player.y,
+            rotation: player.rotation,
+            health: player.health,
+            maxHealth: player.maxHealth,
+            shields: player.shields,
+            maxShields: player.maxShields,
+            score: gameState.score
+        });
     }
     
     // Add smoke particles when damaged (in update, not draw)
@@ -5453,6 +5484,161 @@ function drawPlayer() {
     }
 }
 
+// Draw remote players in multiplayer mode
+function drawRemotePlayers() {
+    if (!multiplayerMode || !networkManager) return;
+    
+    const remotePlayersList = networkManager.getPlayers();
+    remotePlayersList.forEach(remotePlayer => {
+        if (!remotePlayer || isNaN(remotePlayer.x) || isNaN(remotePlayer.y)) return;
+        
+        if (useWebGL && spriteRenderer) {
+            // WebGL rendering for remote player
+            spriteRenderer.begin();
+            
+            // Health bar
+            const healthPercent = (remotePlayer.health || 100) / (remotePlayer.maxHealth || 100);
+            const barWidth = player.width + 10;
+            const barHeight = 4;
+            const barY = remotePlayer.y - player.height / 2 - 15;
+            
+            spriteRenderer.drawRect(
+                remotePlayer.x - barWidth / 2, barY,
+                barWidth, barHeight,
+                new Float32Array([0, 0, 0, 0.6])
+            );
+            
+            const healthR = healthPercent > 0.5 ? (1 - (healthPercent - 0.5) * 2) : 1;
+            const healthG = healthPercent > 0.5 ? 1 : healthPercent * 2;
+            spriteRenderer.drawRect(
+                remotePlayer.x - barWidth / 2, barY,
+                barWidth * healthPercent, barHeight,
+                new Float32Array([healthR, healthG, 0, 1])
+            );
+            
+            // Draw remote player ship (different color to distinguish)
+            const remoteColor = new Float32Array([1, 0.5, 0, 1]); // Orange tint for remote players
+            if (textures.ship) {
+                spriteRenderer.drawSprite(
+                    remotePlayer.x, remotePlayer.y,
+                    player.width, player.height,
+                    remotePlayer.rotation || 0,
+                    textures.ship,
+                    remoteColor
+                );
+            }
+            
+            spriteRenderer.end();
+        } else if (ctx) {
+            // Canvas 2D rendering for remote player
+            ctx.save();
+            ctx.translate(remotePlayer.x, remotePlayer.y);
+            ctx.rotate(remotePlayer.rotation || 0);
+            
+            // Health bar
+            const healthPercent = (remotePlayer.health || 100) / (remotePlayer.maxHealth || 100);
+            const barWidth = player.width + 10;
+            const barHeight = 4;
+            const barY = -player.height / 2 - 15;
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(-barWidth / 2, barY, barWidth, barHeight);
+            
+            const healthR = healthPercent > 0.5 ? (1 - (healthPercent - 0.5) * 2) : 1;
+            const healthG = healthPercent > 0.5 ? 1 : healthPercent * 2;
+            ctx.fillStyle = `rgb(${Math.floor(healthR * 255)}, ${Math.floor(healthG * 255)}, 0)`;
+            ctx.fillRect(-barWidth / 2, barY, barWidth * healthPercent, barHeight);
+            
+            // Draw remote player ship (orange tint)
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = 'rgba(255, 128, 0, 0.8)'; // Orange tint
+            if (playerShipImageLoaded && playerShipImage) {
+                ctx.globalCompositeOperation = 'multiply';
+                ctx.drawImage(
+                    playerShipImage,
+                    -player.width / 2,
+                    -player.height / 2,
+                    player.width,
+                    player.height
+                );
+                ctx.globalCompositeOperation = 'source-over';
+            } else {
+                // Fallback shape
+                ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
+            }
+            
+            ctx.restore();
+        }
+    });
+}
+
+// Multiplayer UI setup
+function setupMultiplayerUI() {
+    const createRoomBtn = document.getElementById('createRoomBtn');
+    const joinRoomBtn = document.getElementById('joinRoomBtn');
+    const roomIdInput = document.getElementById('roomIdInput');
+    const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+    const roomInfo = document.getElementById('roomInfo');
+    const displayRoomId = document.getElementById('displayRoomId');
+    
+    if (createRoomBtn) {
+        createRoomBtn.addEventListener('click', async () => {
+            const roomId = await networkManager.createRoom();
+            if (roomId) {
+                multiplayerMode = true;
+                displayRoomId.textContent = roomId;
+                roomInfo.classList.remove('hidden');
+                createRoomBtn.disabled = true;
+                joinRoomBtn.disabled = true;
+                roomIdInput.disabled = true;
+                console.log('Room created:', roomId);
+            }
+        });
+    }
+    
+    if (joinRoomBtn && roomIdInput) {
+        joinRoomBtn.addEventListener('click', async () => {
+            const roomId = roomIdInput.value.trim();
+            if (roomId) {
+                const success = await networkManager.joinRoom(roomId);
+                if (success) {
+                    multiplayerMode = true;
+                    displayRoomId.textContent = roomId;
+                    roomInfo.classList.remove('hidden');
+                    createRoomBtn.disabled = true;
+                    joinRoomBtn.disabled = true;
+                    roomIdInput.disabled = true;
+                    console.log('Joined room:', roomId);
+                } else {
+                    alert('Failed to join room. Please check the room ID.');
+                }
+            }
+        });
+    }
+    
+    if (leaveRoomBtn) {
+        leaveRoomBtn.addEventListener('click', async () => {
+            await networkManager.leaveRoom();
+            multiplayerMode = false;
+            roomInfo.classList.add('hidden');
+            if (createRoomBtn) createRoomBtn.disabled = false;
+            if (joinRoomBtn) joinRoomBtn.disabled = false;
+            if (roomIdInput) roomIdInput.disabled = false;
+            remotePlayers.clear();
+        });
+    }
+}
+
+// Update player count in UI
+function updatePlayerCountUI() {
+    const playerCountEl = document.getElementById('playerCount');
+    if (playerCountEl && networkManager) {
+        const players = networkManager.getPlayers();
+        playerCountEl.textContent = players.length + 1; // +1 for local player
+    }
+}
+
 function drawBullets() {
     if (useWebGL && circleRenderer && trailRenderer) {
         // WebGL rendering - use circles for bullets to match Canvas 2D
@@ -7880,6 +8066,10 @@ function gameLoop(currentTime = performance.now()) {
                 drawCargoVessel();
             }
             drawPlayer();
+            // Draw remote players in multiplayer mode
+            if (multiplayerMode) {
+                drawRemotePlayers();
+            }
         }
     } catch (error) {
         console.error('Game loop error:', error);
@@ -8179,6 +8369,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     
+    // Initialize Network Manager for multiplayer
+    networkManager = new NetworkManager();
+    await networkManager.initialize(firebaseConfig);
+    
+    // Set up multiplayer event listeners
+    networkManager.on('playersUpdated', (data) => {
+        updatePlayerCountUI();
+    });
+    
+    networkManager.on('playerUpdated', (data) => {
+        // Remote player state updated
+        if (data.player && data.player.id !== networkManager.getPlayerId()) {
+            remotePlayers.set(data.player.id, data.player);
+        }
+    });
+    
+    networkManager.on('playerLeft', (data) => {
+        remotePlayers.delete(data.playerId);
+        updatePlayerCountUI();
+    });
+    
     // Preload RL agent in background so it's ready when autopilot is toggled
     // This prevents delay on first autopilot click
     agentLoadPromise = loadRLAgent().catch(err => {
@@ -8413,6 +8624,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (startMissionBtn) {
         startMissionBtn.addEventListener('click', startMissionMode);
     }
+    
+    // Multiplayer UI handlers
+    setupMultiplayerUI();
     
     // Mobile control buttons
     setupMobileControls();

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Module Test</title>
+</head>
+<body>
+    <h1>Testing ES Module Imports</h1>
+    <div id="results"></div>
+    <script type="module">
+        const results = document.getElementById('results');
+        
+        async function testImports() {
+            try {
+                results.innerHTML += '<p>Testing WebGLRenderer...</p>';
+                const { WebGLRenderer } = await import('./src/rendering/webgl/WebGLRenderer.js');
+                results.innerHTML += '<p style="color: green;">✓ WebGLRenderer loaded</p>';
+                
+                results.innerHTML += '<p>Testing SpriteRenderer...</p>';
+                const { SpriteRenderer } = await import('./src/rendering/webgl/SpriteRenderer.js');
+                results.innerHTML += '<p style="color: green;">✓ SpriteRenderer loaded</p>';
+                
+                results.innerHTML += '<p>Testing ParticleRenderer...</p>';
+                const { ParticleRenderer } = await import('./src/rendering/webgl/ParticleRenderer.js');
+                results.innerHTML += '<p style="color: green;">✓ ParticleRenderer loaded</p>';
+                
+                results.innerHTML += '<p>Testing TrailRenderer...</p>';
+                const { TrailRenderer } = await import('./src/rendering/webgl/TrailRenderer.js');
+                results.innerHTML += '<p style="color: green;">✓ TrailRenderer loaded</p>';
+                
+                results.innerHTML += '<p>Testing ColorUtils...</p>';
+                const { ColorUtils } = await import('./src/rendering/webgl/utils/ColorUtils.js');
+                results.innerHTML += '<p style="color: green;">✓ ColorUtils loaded</p>';
+                
+                results.innerHTML += '<p>Testing shaders...</p>';
+                const shaders = await import('./src/rendering/webgl/shaders.js');
+                results.innerHTML += '<p style="color: green;">✓ Shaders loaded</p>';
+                
+                results.innerHTML += '<p style="color: green; font-weight: bold;">All modules loaded successfully!</p>';
+            } catch (error) {
+                results.innerHTML += `<p style="color: red;">✗ Error: ${error.message}</p>`;
+                results.innerHTML += `<pre>${error.stack}</pre>`;
+                console.error('Import error:', error);
+            }
+        }
+        
+        testImports();
+    </script>
+</body>
+</html>
+
+
+
