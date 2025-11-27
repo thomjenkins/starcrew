@@ -409,6 +409,9 @@ body {
     z-index: 100;
     border: 3px solid #0066ff;
     box-shadow: 0 0 30px rgba(0, 102, 255, 0.5);
+    max-height: 90vh;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 #missionBriefing.hidden {
@@ -1080,6 +1083,12 @@ body {
         width: 90vw;
         max-width: 400px;
         padding: 25px;
+        max-height: 85vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
     }
     
     /* Mobile instructions styling */
