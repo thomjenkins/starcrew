@@ -357,14 +357,14 @@ const weapons = {
     primary: {
         damage: 10,
         cooldown: 0,
-        maxCooldown: 5,
+        maxCooldown: 20,
         ammo: Infinity,
         color: '#ffff00'
     },
     missile: {
         damage: 50,
         cooldown: 0,
-        maxCooldown: 60,
+        maxCooldown: 240,
         ammo: 5,
         maxAmmo: 5,
         color: '#ff6600'
@@ -372,7 +372,7 @@ const weapons = {
     laser: {
         damage: 30,
         cooldown: 0,
-        maxCooldown: 90,
+        maxCooldown: 360,
         ammo: 3,
         maxAmmo: 3,
         color: '#00ffff'
