@@ -9,9 +9,9 @@ export class NetworkManager {
         this.connected = false;
         this.listeners = [];
         this.lastInputSent = 0;
-        this.inputThrottle = 16; // Send inputs every 16ms (~60 updates/sec) for smoother sync
+        this.inputThrottle = 33; // Send inputs every 33ms (~30Hz) - realistic for Firebase
         this.lastEntitySent = 0;
-        this.entityThrottle = 16; // Send entities every 16ms (~60 updates/sec) for low latency
+        this.entityThrottle = 33; // Send complete state every 33ms (~30Hz) for reliable sync
     }
     
     /**

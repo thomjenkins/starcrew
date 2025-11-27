@@ -327,6 +327,7 @@ let allies = [];
 let particles = [];
 let explosions = [];
 let fireworks = [];
+let pendingEffects = []; // Effects to send to non-host players (explosions, sounds)
 
 // High Score
 let highScore = 0;
@@ -1236,12 +1237,25 @@ function updatePlayer() {
                 tractorBeam: tractorBeamState
             });
         } else {
-            // Non-host players: Only send input/position (client-side prediction)
-            // Player movement is predicted locally for instant feel
+            // Non-host players: Only send input/position
+            // All game logic is processed by host
+            let tractorBeamState = null;
+            if (tractorBeam.active && tractorBeam.target) {
+                tractorBeamState = {
+                    active: true,
+                    targetId: tractorBeam.target.id || null,
+                    targetType: tractorBeam.targetType
+                };
+            } else {
+                tractorBeamState = { active: false };
+            }
+            
             networkManager.sendPlayerState({
                 x: player.x,
                 y: player.y,
                 rotation: player.rotation,
+                health: player.health,
+                shields: player.shields,
                 // Send input keys for host to process shooting/actions
                 keys: {
                     space: keys[' '] || false,
@@ -1251,7 +1265,8 @@ function updatePlayer() {
                     mouseButton: mouseButtonDown || false
                 },
                 mouseX: mouseActive ? mouseX : null,
-                mouseY: mouseActive ? mouseY : null
+                mouseY: mouseActive ? mouseY : null,
+                tractorBeam: tractorBeamState
             });
         }
     }
@@ -5151,11 +5166,24 @@ function processRemoteBullets() {
     });
 }
 
+// Track recent collisions to prevent duplicates (collision ID -> timestamp)
+let recentCollisions = new Map();
+
 // Process collisions for remote players (host only)
 function processRemotePlayerCollisions() {
     if (!multiplayerMode || !networkManager || !networkManager.isHostPlayer()) {
         return;
     }
+    
+    const now = Date.now();
+    const COLLISION_COOLDOWN = 500; // 500ms cooldown between same collision
+    
+    // Clean up old collision records
+    recentCollisions.forEach((timestamp, key) => {
+        if (now - timestamp > COLLISION_COOLDOWN) {
+            recentCollisions.delete(key);
+        }
+    });
     
     // Check collisions between entities and remote players
     remotePlayers.forEach((remotePlayer, playerId) => {
@@ -5168,15 +5196,25 @@ function processRemotePlayerCollisions() {
         
         // Check enemy collisions
         enemies.forEach(enemy => {
-            if (checkCollision(enemy, remotePlayerBounds)) {
+            const collisionKey = `${playerId}_enemy_${enemy.id}`;
+            if (checkCollision(enemy, remotePlayerBounds) && !recentCollisions.has(collisionKey)) {
+                recentCollisions.set(collisionKey, now);
+                
                 // Send damage event to remote player
                 networkManager.sendEvent('playerDamaged', {
                     damage: enemy.damage,
                     source: 'enemy',
                     enemyId: enemy.id
                 }, playerId);
+                
+                // Queue effects for non-host
+                pendingEffects.push({ type: 'explosion', x: enemy.x, y: enemy.y, size: 30 });
+                pendingEffects.push({ type: 'sound', name: 'enemyExplosion' });
+                
+                // Play locally on host too
                 sounds.enemyExplosion();
                 createExplosion(enemy.x, enemy.y, 30);
+                
                 gameState.score += 50;
                 gameState.enemiesKilled++;
                 if (gameState.gameMode === 'normal') {
@@ -5188,15 +5226,25 @@ function processRemotePlayerCollisions() {
         
         // Check asteroid collisions
         asteroids.forEach(asteroid => {
-            if (checkCollision(asteroid, remotePlayerBounds)) {
+            const collisionKey = `${playerId}_asteroid_${asteroid.id}`;
+            if (checkCollision(asteroid, remotePlayerBounds) && !recentCollisions.has(collisionKey)) {
+                recentCollisions.set(collisionKey, now);
+                
                 // Send damage event to remote player
                 networkManager.sendEvent('playerDamaged', {
                     damage: asteroid.width * 0.5,
                     source: 'asteroid',
                     asteroidId: asteroid.id
                 }, playerId);
+                
+                // Queue effects for non-host
+                pendingEffects.push({ type: 'explosion', x: asteroid.x, y: asteroid.y, size: asteroid.width });
+                pendingEffects.push({ type: 'sound', name: 'asteroidExplosion' });
+                
+                // Play locally on host too
                 sounds.asteroidExplosion();
                 createExplosion(asteroid.x, asteroid.y, asteroid.width);
+                
                 gameState.score += 20;
                 if (gameState.gameMode === 'normal') {
                     currency += 2;
@@ -5207,13 +5255,22 @@ function processRemotePlayerCollisions() {
         
         // Check boss collisions
         bosses.forEach(boss => {
-            if (checkCollision(boss, remotePlayerBounds)) {
+            const collisionKey = `${playerId}_boss_${boss.id}`;
+            if (checkCollision(boss, remotePlayerBounds) && !recentCollisions.has(collisionKey)) {
+                recentCollisions.set(collisionKey, now);
+                
                 // Boss is instant kill
                 networkManager.sendEvent('playerDamaged', {
-                    damage: 9999, // Instant kill
+                    damage: 9999,
                     source: 'boss',
                     bossId: boss.id
                 }, playerId);
+                
+                // Queue effects for non-host
+                pendingEffects.push({ type: 'explosion', x: boss.x, y: boss.y, size: 50 });
+                pendingEffects.push({ type: 'sound', name: 'enemyExplosion' });
+                
+                // Play locally on host too
                 sounds.enemyExplosion();
                 createExplosion(boss.x, boss.y, 50);
             }
@@ -8936,16 +8993,12 @@ function gameLoop(currentTime = performance.now()) {
                     players: allPlayerStates, // All player positions/states
                     score: gameState.score, // Shared score
                     level: gameState.level,
-                    enemiesKilled: gameState.enemiesKilled
+                    enemiesKilled: gameState.enemiesKilled,
+                    effects: pendingEffects // Effects for non-host to render (explosions, sounds)
                 }, forceSync);
                 
-                // Also send game entities for backward compatibility (can remove later)
-                networkManager.sendGameEntities({
-                    enemies: enemies,
-                    asteroids: asteroids,
-                    bosses: bosses,
-                    cargoVessel: gameState.gameMode === 'mission' ? cargoVessel : null
-                }, forceSync);
+                // Clear pending effects after sending
+                pendingEffects = [];
             }
         } else {
             // Still update UI when paused (for visual feedback)
@@ -8987,64 +9040,30 @@ function gameLoop(currentTime = performance.now()) {
 
 // Helper function to update game logic in one step
 function updateGameStep() {
-    // For non-host players in multiplayer: Update local player and run collision detection
-    // Entity positions come from host, but we run collision detection locally for responsiveness
+    // ============================================================
+    // NON-HOST PATH: Pure renderer - NO game logic
+    // All game state comes from host via completeGameStateUpdated
+    // ============================================================
     if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
-        // Update local player for client-side prediction (instant feel)
+        // Only update local player movement (client-side prediction for responsiveness)
+        // This captures input and moves the local player - position is reconciled with host
         updatePlayer();
         
-        // Update bullets (they come from host, but we need to update positions locally)
-        updateBullets();
+        // NO collision detection - host handles all collisions
+        // NO entity updates - all entity positions come from host
+        // NO bullet updates - all bullets come from host
+        // NO damage application - host sends playerDamaged events
         
-        // For non-host players, entity positions come directly from host's complete game state
-        // We do NOT apply velocities locally to prevent drift - host is authoritative
-        // The 16ms sync rate is fast enough for smooth rendering
-        // Note: updateEnemies() is still called for enemy shooting logic (creates bullets)
-        // but we skip position updates for entities - they come from host
-        
-        // Update enemy bullets visually (positions come from host)
-        // Note: updateEnemyBullets() also checks collisions and applies damage
-        // For non-host players, we need to modify it to only provide visual feedback
-        // For now, we'll let host handle all damage via playerDamaged events
-        // But we still need to update bullet positions, so we'll call it
-        // The damage will be overridden by host's authoritative damage events
-        updateEnemyBullets();
-        
-        // Check collisions with enemies and asteroids (using synced positions from host)
-        // Only visual/audio feedback - damage is applied by host via playerDamaged events
-        enemies.forEach(enemy => {
-            if (checkCollision(enemy, player)) {
-                // Visual/audio feedback only - host will send damage event
-                sounds.enemyExplosion();
-                createExplosion(enemy.x, enemy.y, 30);
-            }
-        });
-        
-        asteroids.forEach(asteroid => {
-            if (checkCollision(asteroid, player)) {
-                // Visual/audio feedback only - host will send damage event
-                sounds.asteroidExplosion();
-                createExplosion(asteroid.x, asteroid.y, asteroid.width);
-            }
-        });
-        
-        bosses.forEach(boss => {
-            if (checkCollision(boss, player)) {
-                // Visual/audio feedback only - host will send damage event
-                sounds.enemyExplosion();
-                createExplosion(boss.x, boss.y, 50);
-            }
-        });
-        
-        // Update particles and other visual effects
+        // Only update visual effects (particles/fireworks are cosmetic)
         updateParticles();
         updateFireworks();
         
-        // Update UI (skip in headless mode, but allow observer mode)
+        // Update UI
         if (!HEADLESS_MODE || OBSERVER_MODE) {
             updateUI();
         }
-        return; // Skip entity position updates - host is authoritative for positions
+        
+        return; // Exit - non-host does NOT run any game logic
     }
     
     // Host runs full game loop
@@ -9552,21 +9571,36 @@ document.addEventListener('DOMContentLoaded', async () => {
                 gameState.enemiesKilled = data.completeState.enemiesKilled;
             }
             
-            // Client-side prediction: Smoothly reconcile local player position with host
-            // This prevents jitter while maintaining responsiveness
+            // Process effects from host (explosions, sounds)
+            if (data.completeState.effects && Array.isArray(data.completeState.effects)) {
+                data.completeState.effects.forEach(effect => {
+                    if (effect.type === 'explosion') {
+                        createExplosion(effect.x, effect.y, effect.size || 30);
+                    } else if (effect.type === 'sound') {
+                        if (effect.name === 'enemyExplosion' && sounds.enemyExplosion) {
+                            sounds.enemyExplosion();
+                        } else if (effect.name === 'asteroidExplosion' && sounds.asteroidExplosion) {
+                            sounds.asteroidExplosion();
+                        } else if (effect.name === 'primaryShot' && sounds.primaryShot) {
+                            sounds.primaryShot();
+                        }
+                    }
+                });
+            }
+            
+            // Reconcile local player position with host (for responsiveness)
             if (data.completeState.players) {
                 const hostPlayerState = data.completeState.players[networkManager.getPlayerId()];
                 if (hostPlayerState) {
-                    // If host position differs significantly, smoothly correct
+                    // Smoothly interpolate to host position
                     const dx = hostPlayerState.x - player.x;
                     const dy = hostPlayerState.y - player.y;
                     const dist = Math.hypot(dx, dy);
                     
-                    if (dist > 5) { // Only correct if difference is significant
-                        // Smoothly interpolate to host position (reconciliation)
-                        player.x += dx * 0.3;
-                        player.y += dy * 0.3;
-                        player.rotation += (hostPlayerState.rotation - player.rotation) * 0.3;
+                    if (dist > 10) { // Only correct if difference is significant
+                        player.x += dx * 0.5;
+                        player.y += dy * 0.5;
+                        player.rotation += (hostPlayerState.rotation - player.rotation) * 0.5;
                     }
                     
                     // Sync health/shields from host (host is authoritative)
