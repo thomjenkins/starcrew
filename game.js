@@ -5720,9 +5720,17 @@ function spawnCargoAlly() {
 // Enemy bullets collision
 function updateEnemyBullets() {
     const enemyBullets = bullets.filter(b => b.type === 'enemy');
+    const isNonHost = multiplayerMode && networkManager && !networkManager.isHostPlayer();
+    
     enemyBullets.forEach(bullet => {
         if (checkCollision(bullet, player)) {
-            takeDamage(bullet.damage);
+            // For non-host players, host is authoritative for damage
+            // We only apply damage locally if we're the host or in single-player
+            if (!isNonHost) {
+                takeDamage(bullet.damage);
+            }
+            // Visual feedback for all players
+            createExplosion(bullet.x, bullet.y, 10);
             // Remove the bullet from the array
             const index = bullets.indexOf(bullet);
             if (index > -1) {
@@ -8972,9 +8980,13 @@ function updateGameStep() {
         // Update bullets (they come from host, but we need to update positions locally)
         updateBullets();
         
-        // Run collision detection locally for immediate feedback
-        // Entity positions are synced from host, but we check collisions locally
-        updateEnemyBullets(); // Check enemy bullet collisions with local player
+        // Update enemy bullets visually (positions come from host)
+        // Note: updateEnemyBullets() also checks collisions and applies damage
+        // For non-host players, we need to modify it to only provide visual feedback
+        // For now, we'll let host handle all damage via playerDamaged events
+        // But we still need to update bullet positions, so we'll call it
+        // The damage will be overridden by host's authoritative damage events
+        updateEnemyBullets();
         
         // Check collisions with enemies and asteroids (using synced positions from host)
         // Only visual/audio feedback - damage is applied by host via playerDamaged events
