@@ -1230,9 +1230,14 @@ function updatePlayer() {
     const weaponsCrewCount = crewAllocation.weapons.length;
     const cooldownMultiplier = Math.max(0.1, 1 - (weaponsCrewCount * crewEffects.weapons.cooldownReduction));
     
+    // Decrement cooldowns: base decrease is 1 per frame
+    // With crew, cooldownMultiplier < 1, so we decrease faster (divide by multiplier)
+    // Example: cooldownMultiplier = 0.9 means 10% faster = decrease by 1/0.9 = 1.11 per frame
     Object.keys(weapons).forEach(weapon => {
         if (weapons[weapon].cooldown > 0) {
-            weapons[weapon].cooldown = Math.max(0, weapons[weapon].cooldown - (1 - cooldownMultiplier));
+            // Always decrease by at least 1, faster with crew
+            const decreaseAmount = 1 / cooldownMultiplier;
+            weapons[weapon].cooldown = Math.max(0, weapons[weapon].cooldown - decreaseAmount);
         }
     });
 
@@ -1298,10 +1303,16 @@ function updatePlayer() {
 function shoot(weaponType) {
     const weapon = weapons[weaponType];
     
+    // Double-check cooldown to prevent spam (defensive programming)
     if (weapon.cooldown > 0 || weapon.ammo <= 0) return;
 
+    // Set cooldown IMMEDIATELY to prevent rapid-fire spam
+    // This must happen before any other logic to ensure rate limiting
     weapon.cooldown = weapon.maxCooldown;
     if (weapon.ammo !== Infinity) weapon.ammo--;
+    
+    // Final safety check - if cooldown was somehow reset, abort
+    if (weapon.cooldown !== weapon.maxCooldown) return;
 
     let damage = weapon.damage * (1 + upgrades.primaryDamage.level * 0.1);
     // Apply weapons crew damage bonus
@@ -2363,19 +2374,38 @@ function drawNebulas() {
 
 // Update enemies
 function updateEnemies() {
-    // For non-host players, only process enemy shooting - positions come from host
-    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+    // In deterministic lockstep, both players update positions and check collisions
+    // For non-host players, still need to check collisions even though positions are deterministic
+    const isNonHost = multiplayerMode && networkManager && !networkManager.isHostPlayer();
+    
+    if (isNonHost) {
+        // Non-host: Check collisions but don't update positions (positions are deterministic from lockstep)
         enemies.forEach(enemy => {
+            // Check collision with player (both players detect collisions in lockstep)
+            if (checkCollision(enemy, player)) {
+                takeDamage(enemy.damage);
+                sounds.enemyExplosion();
+                createExplosion(enemy.x, enemy.y, 30);
+                gameState.score += 50;
+                gameState.enemiesKilled++;
+                // Award credits in normal mode
+                if (gameState.gameMode === 'normal') {
+                    currency += 5;
+                    cumulativeCredits += 5;
+                }
+            }
+            
+            // Process enemy shooting for visual feedback
             // Decrement shoot cooldown
             if (enemy.shootCooldown !== undefined) {
                 enemy.shootCooldown--;
             } else {
-                enemy.shootCooldown = 60 + Math.random() * 60;
+                enemy.shootCooldown = 60 + getRandom() * 60;
             }
             
             // Check if enemy should shoot
             if (enemy.shootCooldown <= 0) {
-                enemy.shootCooldown = 60 + Math.random() * 60;
+                enemy.shootCooldown = 60 + getRandom() * 60;
                 
                 // Calculate target (player)
                 const dx = player.x - enemy.x;
@@ -2401,7 +2431,7 @@ function updateEnemies() {
                 }
             }
         });
-        // For non-host, don't update enemy positions - they come from host
+        // For non-host, don't update enemy positions/AI - they're deterministic from lockstep
         return;
     }
     
@@ -2902,22 +2932,20 @@ function updateBosses() {
 
 // Update asteroids
 function updateAsteroids() {
-    // For non-host players, positions come from host - don't update
-    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
-        return;
-    }
-    
+    // In deterministic lockstep, both players update positions and check collisions
+    // Positions are deterministic (same seed = same positions), so both players can update
     asteroids = asteroids.filter(asteroid => {
         // Apply tractor beam force if this asteroid is the target
         if (tractorBeam.active && tractorBeam.target === asteroid && tractorBeam.targetType === 'asteroid') {
             // Force is already applied in updateTractorBeam, just update position
         }
         
+        // Update position (deterministic - both players do this)
         asteroid.x += asteroid.vx;
         asteroid.y += asteroid.vy;
         asteroid.rotation += asteroid.rotationSpeed;
 
-        // Check collision with player
+        // Check collision with player (both players detect collisions in lockstep)
         if (checkCollision(asteroid, player)) {
             takeDamage(asteroid.width * 0.5);
             sounds.asteroidExplosion();
@@ -6187,7 +6215,7 @@ function drawRemotePlayers() {
                     textures.ship,  // texture first!
                     remotePlayer.x, remotePlayer.y,
                     player.width, player.height,
-                    remotePlayer.rotation || 0,
+                    (remotePlayer.rotation || 0) + Math.PI, // Add 180 degrees to match local player orientation
                     remoteColor,  // color
                     0.5, 0.5  // origin
                 );
@@ -6203,7 +6231,7 @@ function drawRemotePlayers() {
             
             ctx.save();
             ctx.translate(remotePlayer.x, remotePlayer.y);
-            ctx.rotate(remotePlayer.rotation || 0);
+            ctx.rotate((remotePlayer.rotation || 0) + Math.PI); // Add 180 degrees to match local player orientation
             
             // Health bar
             const healthPercent = (remotePlayer.health || 100) / (remotePlayer.maxHealth || 100);
