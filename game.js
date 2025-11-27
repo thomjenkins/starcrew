@@ -9065,7 +9065,31 @@ function updateGameStep() {
             y: player.y,
             rotation: player.rotation,
             health: player.health,
-            shields: player.shields
+            shields: player.shields,
+            keys: {
+                space: keys[' '] || false,
+                key1: keys['1'] || false,
+                key2: keys['2'] || false,
+                key3: keys['3'] || false,
+                mouseButton: mouseButtonDown || false,
+                w: keys['w'] || false,
+                a: keys['a'] || false,
+                s: keys['s'] || false,
+                d: keys['d'] || false,
+                arrowUp: keys['ArrowUp'] || false,
+                arrowDown: keys['ArrowDown'] || false,
+                arrowLeft: keys['ArrowLeft'] || false,
+                arrowRight: keys['ArrowRight'] || false
+            },
+            mouseX: mouseActive ? mouseX : null,
+            mouseY: mouseActive ? mouseY : null,
+            commandModuleOpen: gameState.commandModuleOpen,
+            tractorBeam: {
+                active: tractorBeam.active,
+                targetId: tractorBeam.target ? tractorBeam.target.id || null : null,
+                targetType: tractorBeam.targetType || null,
+                charge: tractorBeam.charge
+            }
         });
     }
 
