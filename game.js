@@ -9021,7 +9021,16 @@ function updateGameStep() {
     // ============================================================
     // DETERMINISTIC LOCKSTEP: Both players run identical game loop
     // ============================================================
-    
+
+    // Host handles authoritative processing of remote player actions
+    if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
+        // Spawn bullets for remote players based on their inputs
+        processRemotePlayerShooting();
+
+        // Apply tractor beam effects from remote players to shared entities
+        processRemoteTractorBeams();
+    }
+
     // Process inputs from queue for this tick (deterministic lockstep)
     // In lockstep, both players process all inputs in the same order
     if (multiplayerMode && networkManager) {
@@ -9053,7 +9062,13 @@ function updateGameStep() {
     updateParticles();
     updateEnemyBullets();
     updateFireworks();
-    
+
+    // Host applies damage/collision logic for remote-controlled entities
+    if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
+        processRemoteBullets();
+        processRemotePlayerCollisions();
+    }
+
     // Increment game tick
     gameTick++;
     
