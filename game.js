@@ -8980,6 +8980,15 @@ function updateGameStep() {
         // Update bullets (they come from host, but we need to update positions locally)
         updateBullets();
         
+        // Update entity positions based on synced state from host
+        // Entities have velocities, so we need to update positions locally for smooth rendering
+        // But positions are authoritative from host, so we'll update velocities/positions
+        // based on the synced state
+        updateEnemies(); // Update enemy positions (host sends positions, but we update for smooth rendering)
+        updateAsteroids(); // Update asteroid positions
+        updateBosses(); // Update boss positions
+        updateNebulas(); // Update nebula positions
+        
         // Update enemy bullets visually (positions come from host)
         // Note: updateEnemyBullets() also checks collisions and applies damage
         // For non-host players, we need to modify it to only provide visual feedback
