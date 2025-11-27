@@ -1471,14 +1471,14 @@ function updateBullets() {
                 const enemy = enemies[i];
                 if (checkCollision(bullet, enemy)) {
                     if (isAuthoritativeForDamage) {
-                        enemy.health -= bullet.damage;
+                    enemy.health -= bullet.damage;
                     }
-
+                    
                     // Cluster weapon spread effect
                     if (bullet.type === 'cluster' && bullet.clusterSpread) {
                         createExplosion(bullet.x, bullet.y, 30);
                         sounds.enemyExplosion();
-
+                        
                         // Spread to nearby enemies
                         const spreadRadius = weapons.cluster.spreadRadius;
                         const spreadDamage = bullet.damage * 0.7; // 70% damage on spread
@@ -1487,18 +1487,18 @@ function updateBullets() {
                         // Function to recursively spread
                         function spreadCluster(centerX, centerY, depth) {
                             if (depth > 3) return; // Limit spread depth to prevent infinite loops
-
+                            
                             for (let j = 0; j < enemies.length; j++) {
                                 if (hitEnemies.has(j)) continue; // Skip already hit enemies
-
+                                
                                 const dist = Math.hypot(enemies[j].x - centerX, enemies[j].y - centerY);
                                 if (dist < spreadRadius) {
                                     if (isAuthoritativeForDamage) {
-                                        enemies[j].health -= spreadDamage;
+                                    enemies[j].health -= spreadDamage;
                                     }
                                     hitEnemies.add(j);
                                     createExplosion(enemies[j].x, enemies[j].y, 20);
-
+                                    
                                     // Continue spreading from this enemy
                                     spreadCluster(enemies[j].x, enemies[j].y, depth + 1);
                                 }
@@ -1527,7 +1527,7 @@ function updateBullets() {
                 const asteroid = asteroids[i];
                 if (checkCollision(bullet, asteroid)) {
                     if (isAuthoritativeForDamage) {
-                        asteroid.health -= bullet.damage;
+                    asteroid.health -= bullet.damage;
                     }
                     if (!bullet.pierce || bullet.type === 'cluster') {
                         createExplosion(bullet.x, bullet.y, 10);
@@ -1849,7 +1849,7 @@ function spawnNebula() {
     
     // Generate many cloud blobs with noise-like distribution for organic cloud appearance
     const cloudBlobs = [];
-    const blobCount = 20 + Math.floor(Math.random() * 15); // 20-34 blobs for dense, continuous clouds
+    const blobCount = 20 + Math.floor(getRandom() * 15); // 20-34 blobs for dense, continuous clouds
     
     // Create a more organic distribution using multiple layers
     for (let i = 0; i < blobCount; i++) {
@@ -1860,36 +1860,36 @@ function spawnNebula() {
         let angle, dist, baseRadius;
         if (layer === 0) {
             // Core layer - dense center
-            angle = layerProgress * Math.PI * 2 + Math.random() * 0.5;
-            dist = (Math.random() * 0.3 + 0.05) * size / 2; // Close to center
-            baseRadius = size * (0.15 + Math.random() * 0.2); // Larger core blobs
+            angle = layerProgress * Math.PI * 2 + getRandom() * 0.5;
+            dist = (getRandom() * 0.3 + 0.05) * size / 2; // Close to center
+            baseRadius = size * (0.15 + getRandom() * 0.2); // Larger core blobs
         } else if (layer === 1) {
             // Mid layer - medium density
-            angle = layerProgress * Math.PI * 2 + Math.random() * 0.8;
-            dist = (Math.random() * 0.4 + 0.2) * size / 2; // Medium distance
-            baseRadius = size * (0.1 + Math.random() * 0.25); // Medium blobs
+            angle = layerProgress * Math.PI * 2 + getRandom() * 0.8;
+            dist = (getRandom() * 0.4 + 0.2) * size / 2; // Medium distance
+            baseRadius = size * (0.1 + getRandom() * 0.25); // Medium blobs
         } else {
             // Outer layer - sparse edges
-            angle = layerProgress * Math.PI * 2 + Math.random() * 1.2;
-            dist = (Math.random() * 0.5 + 0.4) * size / 2; // Far from center
-            baseRadius = size * (0.08 + Math.random() * 0.2); // Smaller edge blobs
+            angle = layerProgress * Math.PI * 2 + getRandom() * 1.2;
+            dist = (getRandom() * 0.5 + 0.4) * size / 2; // Far from center
+            baseRadius = size * (0.08 + getRandom() * 0.2); // Smaller edge blobs
         }
         
         // Add some randomness for organic feel
-        angle += (Math.random() - 0.5) * 0.3;
-        dist += (Math.random() - 0.5) * size * 0.1;
+        angle += (getRandom() - 0.5) * 0.3;
+        dist += (getRandom() - 0.5) * size * 0.1;
         
         cloudBlobs.push({
             x: Math.cos(angle) * dist,
             y: Math.sin(angle) * dist,
             radius: baseRadius,
             baseRadius: baseRadius,
-            vx: (Math.random() - 0.5) * 0.4,
-            vy: (Math.random() - 0.5) * 0.4,
-            phase: Math.random() * Math.PI * 2,
-            morphSpeed: 0.3 + Math.random() * 0.4,
-            sizeVariation: 0.15 + Math.random() * 0.25,
-            density: 0.6 + Math.random() * 0.4 // Varying density for more organic look
+            vx: (getRandom() - 0.5) * 0.4,
+            vy: (getRandom() - 0.5) * 0.4,
+            phase: getRandom() * Math.PI * 2,
+            morphSpeed: 0.3 + getRandom() * 0.4,
+            sizeVariation: 0.15 + getRandom() * 0.25,
+            density: 0.6 + getRandom() * 0.4 // Varying density for more organic look
         });
     }
     
@@ -1900,26 +1900,23 @@ function spawnNebula() {
         height: size,
         vx: vx,
         vy: vy,
-        rotation: Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 0.02,
+        rotation: getRandom() * Math.PI * 2,
+        rotationSpeed: (getRandom() - 0.5) * 0.02,
         color: `hsl(${hue}, ${saturation}%, ${lightness}%)`,
         glowColor: `hsl(${hue}, ${Math.min(100, saturation + 20)}%, ${Math.min(80, lightness + 20)}%)`, // Brighter glow
         damagePerSecond: 2 + (cumulativeCredits / 100) * 0.5, // Scale with cumulative credits
         lastPlayerDamageTime: 0,
         lastCargoDamageTime: 0,
         cloudBlobs: cloudBlobs,
-        morphTime: Math.random() * Math.PI * 2, // Starting phase for morphing
-        morphSpeed: 0.015 + Math.random() * 0.01 // Overall morph speed (0.015-0.025)
+        morphTime: getRandom() * Math.PI * 2, // Starting phase for morphing
+        morphSpeed: 0.015 + getRandom() * 0.01 // Overall morph speed (0.015-0.025)
     });
 }
 
 // Update nebulas
 function updateNebulas() {
-    // For non-host players, positions come from host - don't update
-    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
-        return;
-    }
-    
+    // In deterministic lockstep, both players update positions
+    // Both players run the same deterministic simulation, so positions stay in sync
     const now = Date.now();
     
     nebulas = nebulas.filter(nebula => {
@@ -1933,8 +1930,8 @@ function updateNebulas() {
             nebula.morphSpeed = nebula.morphSpeed || 0.02;
             nebula.morphTime += nebula.morphSpeed; // Variable morphing speed
         } else {
-            nebula.morphTime = Math.random() * Math.PI * 2; // Initialize if missing
-            nebula.morphSpeed = 0.015 + Math.random() * 0.01;
+            nebula.morphTime = getRandom() * Math.PI * 2; // Initialize if missing
+            nebula.morphSpeed = 0.015 + getRandom() * 0.01;
         }
         
         if (nebula.cloudBlobs) {
@@ -2401,65 +2398,7 @@ function drawNebulas() {
 // Update enemies
 function updateEnemies() {
     // In deterministic lockstep, both players update positions and check collisions
-    // For non-host players, still need to check collisions even though positions are deterministic
-    const isNonHost = multiplayerMode && networkManager && !networkManager.isHostPlayer();
-    
-    if (isNonHost) {
-        // Non-host: Check collisions but don't update positions (positions are deterministic from lockstep)
-        enemies.forEach(enemy => {
-            // Check collision with player (both players detect collisions in lockstep)
-            if (checkCollision(enemy, player)) {
-                takeDamage(enemy.damage);
-                sounds.enemyExplosion();
-                createExplosion(enemy.x, enemy.y, 30);
-                gameState.score += 50;
-                gameState.enemiesKilled++;
-                // Award credits in normal mode
-                if (gameState.gameMode === 'normal') {
-                    currency += 5;
-                    cumulativeCredits += 5;
-                }
-            }
-            
-            // Process enemy shooting for visual feedback
-            // Decrement shoot cooldown
-            if (enemy.shootCooldown !== undefined) {
-                enemy.shootCooldown--;
-            } else {
-                enemy.shootCooldown = 60 + getRandom() * 60;
-            }
-            
-            // Check if enemy should shoot
-            if (enemy.shootCooldown <= 0) {
-                enemy.shootCooldown = 60 + getRandom() * 60;
-                
-                // Calculate target (player)
-                const dx = player.x - enemy.x;
-                const dy = player.y - enemy.y;
-                const dist = Math.hypot(dx, dy);
-                
-                if (dist > 0) {
-                    // Shoot at target from the front of the enemy
-                    const frontX = enemy.x + Math.sin(enemy.rotation) * ((enemy.height || 20) / 2);
-                    const frontY = enemy.y - Math.cos(enemy.rotation) * ((enemy.height || 20) / 2);
-                    
-                    bullets.push({
-                        x: frontX,
-                        y: frontY,
-                        vx: (dx / dist) * 3,
-                        vy: (dy / dist) * 3,
-                        damage: enemy.damage || 10,
-                        color: '#ff0000',
-                        size: 4,
-                        type: 'enemy',
-                        glow: true
-                    });
-                }
-            }
-        });
-        // For non-host, don't update enemy positions/AI - they're deterministic from lockstep
-        return;
-    }
+    // Both players run the same deterministic simulation, so positions stay in sync
     
     enemies = enemies.filter(enemy => {
         // Decrease target switch cooldown
@@ -5848,7 +5787,7 @@ function updateEnemyBullets() {
             // For non-host players, host is authoritative for damage
             // We only apply damage locally if we're the host or in single-player
             if (!isNonHost) {
-                takeDamage(bullet.damage);
+            takeDamage(bullet.damage);
             }
             // Visual feedback for all players
             createExplosion(bullet.x, bullet.y, 10);
@@ -8963,45 +8902,45 @@ function gameLoop(currentTime = performance.now()) {
             // Spawning (tick-based for deterministic lockstep)
             // Only spawn if we have the seed in multiplayer (ensures determinism)
             if (!multiplayerMode || (multiplayerMode && gameSeed !== null)) {
-                // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
-                const creditDifficulty = cumulativeCredits / 100;
-                
-                // Maximum enemies on screen to prevent overwhelming swarms
-                const maxEnemiesOnScreen = Math.min(25, 4 + Math.floor(creditDifficulty * 0.8)); // Reduced from 8 to 4 at start, gradual increase to 25 max
-                
-                // More gradual spawn rate decrease - uses a smoother curve to prevent sudden jumps
-                // Formula: baseRate - (creditDifficulty^1.2 * ratePerLevel) for even smoother progression
+            // Difficulty scales with cumulative credits (every 100 credits = 1 difficulty level)
+            const creditDifficulty = cumulativeCredits / 100;
+            
+            // Maximum enemies on screen to prevent overwhelming swarms
+            const maxEnemiesOnScreen = Math.min(25, 4 + Math.floor(creditDifficulty * 0.8)); // Reduced from 8 to 4 at start, gradual increase to 25 max
+            
+            // More gradual spawn rate decrease - uses a smoother curve to prevent sudden jumps
+            // Formula: baseRate - (creditDifficulty^1.2 * ratePerLevel) for even smoother progression
                 // Convert to ticks: 60 ticks per second (assuming 60fps fixed timestep)
                 const enemySpawnRateTicks = Math.max(72, 480 - Math.floor(Math.pow(creditDifficulty, 1.2) * 2.4)); // ~8 seconds = 480 ticks at 60fps
-                
-                // Only spawn if we're under the enemy cap
+            
+            // Only spawn if we're under the enemy cap
                 if (enemies.length < maxEnemiesOnScreen && gameTick - lastSpawnTick >= enemySpawnRateTicks) {
-                    spawnEnemy();
+                spawnEnemy();
                     lastSpawnTick = gameTick;
-                }
+            }
 
-                // Very gradual chance for extra spawn at high difficulty (only if under cap)
-                // This replaces the sudden threshold-based spawns with a smooth probability curve
-                if (enemies.length < maxEnemiesOnScreen && creditDifficulty > 10) {
-                    // Probability increases very gradually: 0% at difficulty 10, up to 5% at difficulty 50
-                    const extraSpawnChance = Math.min(0.05, (creditDifficulty - 10) / 800);
+            // Very gradual chance for extra spawn at high difficulty (only if under cap)
+            // This replaces the sudden threshold-based spawns with a smooth probability curve
+            if (enemies.length < maxEnemiesOnScreen && creditDifficulty > 10) {
+                // Probability increases very gradually: 0% at difficulty 10, up to 5% at difficulty 50
+                const extraSpawnChance = Math.min(0.05, (creditDifficulty - 10) / 800);
                     if (getRandom() < extraSpawnChance && gameTick - lastSpawnTick >= enemySpawnRateTicks * 0.5) {
-                        spawnEnemy();
+                spawnEnemy();
                         lastSpawnTick = gameTick;
-                    }
-                }
+            }
+            }
 
-                // More gradual asteroid spawn rate - uses smoother curve
+            // More gradual asteroid spawn rate - uses smoother curve
                 const asteroidSpawnRateTicks = Math.max(72, 270 - Math.floor(Math.pow(creditDifficulty, 1.3) * 3.6)); // ~4.5 seconds = 270 ticks
                 if (gameTick - lastAsteroidSpawnTick >= asteroidSpawnRateTicks) {
-                    spawnAsteroid();
+                spawnAsteroid();
                     lastAsteroidSpawnTick = gameTick;
-                }
+            }
 
-                // Spawn nebulas (less frequent, but persistent) - more gradual
+            // Spawn nebulas (less frequent, but persistent) - more gradual
                 const nebulaSpawnRateTicks = Math.max(600, 1080 - Math.floor(Math.pow(creditDifficulty, 1.2) * 12)); // ~18 seconds = 1080 ticks
                 if (gameTick - lastNebulaSpawnTick >= nebulaSpawnRateTicks) {
-                    spawnNebula();
+                spawnNebula();
                     lastNebulaSpawnTick = gameTick;
                 }
             }
