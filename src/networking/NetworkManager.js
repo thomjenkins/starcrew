@@ -4,12 +4,11 @@ export class NetworkManager {
         this.db = null;
         this.roomId = null;
         this.playerId = null;
+        this.gameSeed = null;
         this.players = new Map(); // Other players: {id: {x, y, rotation, health, shields, ...}}
         this.isHost = false;
         this.connected = false;
         this.listeners = [];
-        this.lastInputSent = 0;
-        this.inputThrottle = 33; // Send inputs every 33ms (~30Hz) - realistic for Firebase
         this.lastStateSent = 0;
         this.stateThrottle = 20; // Send player state frequently for smooth remote control
         this.lastEntitySent = 0;
@@ -79,7 +78,9 @@ export class NetworkManager {
                     running: true
                 }
             });
-            
+
+            this.gameSeed = gameSeed;
+
             // Add this player to the room
             await roomRef.child(`players/${this.playerId}`).set({
                 id: this.playerId,
@@ -116,12 +117,17 @@ export class NetworkManager {
         try {
             const roomRef = this.db.ref(`rooms/${this.roomId}`);
             const snapshot = await roomRef.once('value');
-            
+
             if (!snapshot.exists()) {
                 console.error('Room does not exist');
                 return false;
             }
-            
+
+            const existingSeed = snapshot.val()?.gameSeed;
+            if (existingSeed) {
+                this.gameSeed = existingSeed;
+            }
+
             // Add this player to the room
             await roomRef.child(`players/${this.playerId}`).set({
                 id: this.playerId,
@@ -147,7 +153,7 @@ export class NetworkManager {
      */
     setupRoomListeners() {
         if (!this.db || !this.roomId) return;
-        
+
         const roomRef = this.db.ref(`rooms/${this.roomId}`);
         
         // Listen for other players joining/leaving
@@ -165,15 +171,6 @@ export class NetworkManager {
             this.notifyListeners('playersUpdated', { players: Array.from(this.players.values()) });
         });
         
-        // Listen for player state updates
-        roomRef.child('players').on('child_changed', (snapshot) => {
-            const playerData = snapshot.val();
-            if (playerData && playerData.id !== this.playerId) {
-                this.players.set(playerData.id, playerData);
-                this.notifyListeners('playerUpdated', { player: playerData });
-            }
-        });
-        
         // Listen for player disconnections
         roomRef.child('players').on('child_removed', (snapshot) => {
             const playerId = snapshot.key;
@@ -181,51 +178,17 @@ export class NetworkManager {
             this.notifyListeners('playerLeft', { playerId });
         });
         
-        // Listen for shared game state (if host)
-        if (this.isHost) {
-            // Host manages shared state
-        } else {
-            // Clients listen to host's game state
-            roomRef.child('gameState').on('value', (snapshot) => {
-                const gameState = snapshot.val();
-                if (gameState) {
-                    this.notifyListeners('gameStateUpdated', { gameState });
-                }
-            });
-            
-            // Clients listen to host's game entities (enemies, asteroids)
-            roomRef.child('gameEntities').on('value', (snapshot) => {
-                const entities = snapshot.val();
-                if (entities) {
-                    this.notifyListeners('gameEntitiesUpdated', { entities });
-                }
-            });
-            
-            // Listen for game seed (for deterministic lockstep)
+        // Listen for shared game seed (clients)
+        if (!this.isHost) {
             roomRef.child('gameSeed').on('value', (snapshot) => {
                 const seed = snapshot.val();
                 if (seed) {
+                    this.gameSeed = seed;
                     this.notifyListeners('gameSeedUpdated', { seed });
                 }
             });
-            
-            // Listen for inputs from other players (deterministic lockstep)
-            roomRef.child('inputs').on('child_added', (snapshot) => {
-                const input = snapshot.val();
-                if (input && input.playerId !== this.playerId) {
-                    this.notifyListeners('inputReceived', { input });
-                }
-            });
-
-            // Listen for authoritative state snapshots from host
-            roomRef.child('completeGameState').on('value', (snapshot) => {
-                const completeState = snapshot.val();
-                if (completeState) {
-                    this.notifyListeners('completeGameStateUpdated', { completeState });
-                }
-            });
         }
-        
+
         // Listen for events (playerDied, playerDamaged, etc.) - all players listen
         roomRef.child('events').on('child_added', (snapshot) => {
             const event = snapshot.val();
@@ -236,6 +199,28 @@ export class NetworkManager {
                 }
                 // Process events (either broadcast or targeted to us)
                 this.notifyListeners(event.type, { ...event.data, playerId: event.playerId } || {});
+            }
+        });
+
+        // WebRTC signaling
+        roomRef.child('webrtc/offer').on('value', (snapshot) => {
+            const offer = snapshot.val();
+            if (offer && offer.playerId !== this.playerId) {
+                this.notifyListeners('webRTCOffer', { offer });
+            }
+        });
+
+        roomRef.child('webrtc/answer').on('value', (snapshot) => {
+            const answer = snapshot.val();
+            if (answer && answer.playerId !== this.playerId) {
+                this.notifyListeners('webRTCAnswer', { answer });
+            }
+        });
+
+        roomRef.child('webrtc/candidates').on('child_added', (snapshot) => {
+            const candidate = snapshot.val();
+            if (candidate && candidate.playerId !== this.playerId) {
+                this.notifyListeners('iceCandidate', { candidate });
             }
         });
     }
@@ -363,39 +348,61 @@ export class NetworkManager {
     }
     
     /**
-     * Send player input for deterministic lockstep
-     */
-    async sendInput(input) {
-        if (!this.connected || !this.db || !this.roomId || !this.playerId) {
-            return;
-        }
-        
-        const now = Date.now();
-        if (now - this.lastInputSent < this.inputThrottle) {
-            return; // Throttle updates
-        }
-        this.lastInputSent = now;
-        
-        try {
-            const inputsRef = this.db.ref(`rooms/${this.roomId}/inputs`);
-            await inputsRef.push({
-                playerId: this.playerId,
-                tick: input.tick,
-                keys: input.keys,
-                mouseX: input.mouseX,
-                mouseY: input.mouseY,
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-            });
-        } catch (error) {
-            console.error('Failed to send input:', error);
-        }
-    }
-    
-    /**
      * Register a listener for network events
      */
     on(event, callback) {
         this.listeners.push({ event, callback });
+    }
+
+    /**
+     * Send WebRTC offer via Firebase signaling
+     */
+    async sendWebRTCOffer(offer) {
+        if (!this.connected || !this.db || !this.roomId || !offer) return;
+
+        try {
+            await this.db.ref(`rooms/${this.roomId}/webrtc/offer`).set({
+                ...offer,
+                playerId: this.playerId,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+        } catch (error) {
+            console.error('Failed to send WebRTC offer:', error);
+        }
+    }
+
+    /**
+     * Send WebRTC answer via Firebase signaling
+     */
+    async sendWebRTCAnswer(answer) {
+        if (!this.connected || !this.db || !this.roomId || !answer) return;
+
+        try {
+            await this.db.ref(`rooms/${this.roomId}/webrtc/answer`).set({
+                ...answer,
+                playerId: this.playerId,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+        } catch (error) {
+            console.error('Failed to send WebRTC answer:', error);
+        }
+    }
+
+    /**
+     * Send ICE candidate via Firebase signaling
+     */
+    async sendICECandidate(candidate) {
+        if (!this.connected || !this.db || !this.roomId || !candidate) return;
+
+        try {
+            await this.db.ref(`rooms/${this.roomId}/webrtc/candidates`).push({
+                ...candidate,
+                playerId: this.playerId,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+        } catch (error) {
+            console.error('Failed to send ICE candidate:', error);
+        }
     }
     
     /**
@@ -474,12 +481,19 @@ export class NetworkManager {
     getPlayerId() {
         return this.playerId;
     }
-    
+
     /**
      * Check if this player is the host
      */
     isHostPlayer() {
         return this.isHost;
+    }
+
+    /**
+     * Get the deterministic game seed for the room
+     */
+    getGameSeed() {
+        return this.gameSeed;
     }
 }
 

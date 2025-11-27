@@ -7,6 +7,7 @@ import { CircleRenderer } from './src/rendering/webgl/CircleRenderer.js';
 import { NebulaRenderer } from './src/rendering/webgl/NebulaRenderer.js';
 import { ColorUtils } from './src/rendering/webgl/utils/ColorUtils.js';
 import { NetworkManager } from './src/networking/NetworkManager.js';
+import { WebRTCManager } from './src/networking/WebRTCManager.js';
 
 let canvas;
 let ctx;
@@ -82,6 +83,39 @@ function getRandomInt(min, max) {
         return deterministicRNG.randomInt(min, max);
     }
     return Math.floor(min + Math.random() * (max - min));
+}
+
+function updateConnectionStatus(message = '', isError = false) {
+    if (typeof document === 'undefined') return;
+
+    if (!connectionStatusEl) {
+        connectionStatusEl = document.getElementById('connectionStatus');
+        if (!connectionStatusEl) {
+            connectionStatusEl = document.createElement('div');
+            connectionStatusEl.id = 'connectionStatus';
+            connectionStatusEl.style.position = 'absolute';
+            connectionStatusEl.style.top = '10px';
+            connectionStatusEl.style.left = '50%';
+            connectionStatusEl.style.transform = 'translateX(-50%)';
+            connectionStatusEl.style.padding = '8px 12px';
+            connectionStatusEl.style.background = 'rgba(0, 0, 0, 0.6)';
+            connectionStatusEl.style.color = '#fff';
+            connectionStatusEl.style.zIndex = '999';
+            connectionStatusEl.style.borderRadius = '6px';
+            document.body.appendChild(connectionStatusEl);
+        }
+    }
+
+    if (connectionStatusEl) {
+        if (!message) {
+            connectionStatusEl.classList.add('hidden');
+            connectionStatusEl.textContent = '';
+        } else {
+            connectionStatusEl.classList.remove('hidden');
+            connectionStatusEl.textContent = message;
+            connectionStatusEl.style.border = isError ? '1px solid #ff6b6b' : 'none';
+        }
+    }
 }
 
 // Helper to identify the current player for multiplayer payloads
@@ -296,6 +330,9 @@ function initCrewImage() {
 
 // Multiplayer - Deterministic Lockstep
 let networkManager = null;
+let webrtcManager = null;
+let webrtcConnected = false;
+let seedReceived = false;
 let remotePlayers = new Map(); // Other players: {id: {x, y, rotation, health, shields, ...}}
 let multiplayerMode = false;
 let remoteCrewAllocations = new Map(); // Remote players' crew allocations: {playerId: {engineering: count, navigation: count}}
@@ -308,6 +345,30 @@ let remotePlayerWeapons = new Map(); // Track remote player weapon states: {play
 let inputQueue = []; // [{tick, playerId, input, timestamp}, ...]
 let lastProcessedTick = -1;
 let inputBufferSize = 3; // Process inputs 3 ticks ahead for lag compensation
+let connectionStatusEl = null;
+
+function enqueueRemoteInput(input) {
+    if (!input) return;
+
+    inputQueue.push({
+        tick: input.tick,
+        playerId: input.playerId,
+        keys: input.keys,
+        mouseX: input.mouseX,
+        mouseY: input.mouseY,
+        timestamp: input.timestamp
+    });
+
+    inputQueue.sort((a, b) => a.tick - b.tick);
+}
+
+function resetLockstepStateIfReady() {
+    if (multiplayerMode && seedReceived && webrtcConnected) {
+        gameTick = 0;
+        inputQueue = [];
+        lastProcessedTick = -1;
+    }
+}
 
 // Firebase configuration
 const firebaseConfig = {
@@ -1260,9 +1321,10 @@ function updatePlayer() {
     }
     
     // Send player input for deterministic lockstep
-    if (multiplayerMode && networkManager && networkManager.isConnected()) {
-        networkManager.sendInput({
+    if (multiplayerMode && webrtcManager && webrtcConnected && networkManager) {
+        webrtcManager.sendInput({
             tick: gameTick,
+            playerId: networkManager.getPlayerId(),
             keys: {
                 space: keys[' '] || false,
                 key1: keys['1'] || false,
@@ -6298,6 +6360,57 @@ function drawRemotePlayers() {
     }
 }
 
+async function initializeWebRTCConnection(isHost) {
+    if (!networkManager) return;
+
+    if (webrtcManager) {
+        webrtcManager.close();
+    }
+
+    webrtcManager = new WebRTCManager();
+    webrtcConnected = false;
+    updateConnectionStatus('Connecting to player...');
+
+    webrtcManager.on('offerCreated', async ({ offer }) => {
+        await networkManager.sendWebRTCOffer(offer);
+    });
+
+    webrtcManager.on('answerCreated', async ({ answer }) => {
+        await networkManager.sendWebRTCAnswer(answer);
+    });
+
+    webrtcManager.on('iceCandidate', async ({ candidate }) => {
+        await networkManager.sendICECandidate(candidate);
+    });
+
+    webrtcManager.on('inputReceived', ({ input }) => {
+        enqueueRemoteInput(input);
+    });
+
+    webrtcManager.on('connected', () => {
+        webrtcConnected = true;
+        updateConnectionStatus('Connected to player');
+        resetLockstepStateIfReady();
+    });
+
+    webrtcManager.on('disconnected', () => {
+        webrtcConnected = false;
+        updateConnectionStatus('Connection lost. Reconnecting...');
+        if (multiplayerMode) {
+            setTimeout(() => {
+                initializeWebRTCConnection(isHost);
+            }, 500);
+        }
+    });
+
+    webrtcManager.on('error', (error) => {
+        console.error('[WebRTC] Connection error:', error);
+        updateConnectionStatus('Connection error', true);
+    });
+
+    await webrtcManager.createConnection(isHost);
+}
+
 // Multiplayer UI setup
 function setupMultiplayerUI() {
     const createRoomBtn = document.getElementById('createRoomBtn');
@@ -6317,6 +6430,15 @@ function setupMultiplayerUI() {
                 createRoomBtn.disabled = true;
                 joinRoomBtn.disabled = true;
                 roomIdInput.disabled = true;
+                const seed = networkManager.getGameSeed();
+                if (seed) {
+                    gameSeed = seed;
+                    deterministicRNG = new DeterministicRNG(gameSeed);
+                    seedReceived = true;
+                }
+                await initializeWebRTCConnection(true);
+                resetLockstepStateIfReady();
+                updateConnectionStatus('Connecting to player...');
                 console.log('Room created:', roomId);
             }
         });
@@ -6334,6 +6456,15 @@ function setupMultiplayerUI() {
                     createRoomBtn.disabled = true;
                     joinRoomBtn.disabled = true;
                     roomIdInput.disabled = true;
+                    const seed = networkManager.getGameSeed();
+                    if (seed) {
+                        gameSeed = seed;
+                        deterministicRNG = new DeterministicRNG(gameSeed);
+                        seedReceived = true;
+                    }
+                    await initializeWebRTCConnection(false);
+                    resetLockstepStateIfReady();
+                    updateConnectionStatus('Connecting to player...');
                     console.log('Joined room:', roomId);
                 } else {
                     alert('Failed to join room. Please check the room ID.');
@@ -6346,11 +6477,19 @@ function setupMultiplayerUI() {
         leaveRoomBtn.addEventListener('click', async () => {
             await networkManager.leaveRoom();
             multiplayerMode = false;
+            webrtcConnected = false;
+            seedReceived = false;
+            if (webrtcManager) {
+                webrtcManager.close();
+                webrtcManager = null;
+            }
             roomInfo.classList.add('hidden');
             if (createRoomBtn) createRoomBtn.disabled = false;
             if (joinRoomBtn) joinRoomBtn.disabled = false;
             if (roomIdInput) roomIdInput.disabled = false;
             remotePlayers.clear();
+            inputQueue = [];
+            updateConnectionStatus('');
         });
     }
 }
@@ -8885,6 +9024,17 @@ function gameLoop(currentTime = performance.now()) {
     // Calculate delta time
     const deltaTime = currentTime - lastFrameTime;
     lastFrameTime = currentTime;
+
+    if (multiplayerMode && (!seedReceived || !webrtcConnected)) {
+        const statusMessage = !seedReceived ? 'Waiting for game seed...' : 'Connecting to player...';
+        updateConnectionStatus(statusMessage);
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+
+    if (!multiplayerMode || (seedReceived && webrtcConnected)) {
+        updateConnectionStatus('');
+    }
     
     // Allow loop to run even if gameState.running is false (for rendering UI/briefing)
     // But skip updates if not running
@@ -9555,28 +9705,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Listen for game seed (deterministic lockstep)
     networkManager.on('gameSeedUpdated', (data) => {
-        if (data.seed && gameSeed === null) {
+        if (data.seed) {
             gameSeed = data.seed;
             deterministicRNG = new DeterministicRNG(gameSeed);
+            seedReceived = true;
+            resetLockstepStateIfReady();
             console.log('[LOCKSTEP] Game seed received:', gameSeed);
         }
     });
-    
-    // Listen for inputs from other players (deterministic lockstep)
-    networkManager.on('inputReceived', (data) => {
-        if (data.input) {
-            // Add input to queue for processing at the correct tick
-            inputQueue.push({
-                tick: data.input.tick,
-                playerId: data.input.playerId,
-                keys: data.input.keys,
-                mouseX: data.input.mouseX,
-                mouseY: data.input.mouseY,
-                timestamp: data.input.timestamp
-            });
-            
-            // Sort queue by tick
-            inputQueue.sort((a, b) => a.tick - b.tick);
+
+    networkManager.on('webRTCOffer', async (data) => {
+        if (data.offer && webrtcManager) {
+            await webrtcManager.handleOffer(data.offer);
+        }
+    });
+
+    networkManager.on('webRTCAnswer', async (data) => {
+        if (data.answer && webrtcManager) {
+            await webrtcManager.handleAnswer(data.answer);
+        }
+    });
+
+    networkManager.on('iceCandidate', async (data) => {
+        if (data.candidate && webrtcManager) {
+            await webrtcManager.handleIceCandidate(data.candidate);
         }
     });
     
