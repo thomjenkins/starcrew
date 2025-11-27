@@ -4766,17 +4766,26 @@ function loadPlaceholderAgent() {
             // Simple heuristic: move toward nearest enemy if health > 50%, otherwise avoid
             const playerHealth = obs[3]; // health normalized [0, 1]
             
+            let action;
             if (playerHealth > 0.5) {
                 // Aggressive: try to shoot or move toward enemies
                 const nearestEnemyDist = obs[9]; // First enemy distance
                 if (nearestEnemyDist < 0.5) {
-                    return Math.random() < 0.7 ? ACTIONS.SHOOT_PRIMARY : ACTIONS.MOVE_UP;
+                    action = Math.random() < 0.7 ? ACTIONS.SHOOT_PRIMARY : ACTIONS.MOVE_UP;
+                } else {
+                    action = ACTIONS.MOVE_UP;
                 }
-                return ACTIONS.MOVE_UP;
             } else {
                 // Defensive: avoid and shoot
-                return Math.random() < 0.5 ? ACTIONS.MOVE_DOWN : ACTIONS.SHOOT_PRIMARY;
+                action = Math.random() < 0.5 ? ACTIONS.MOVE_DOWN : ACTIONS.SHOOT_PRIMARY;
             }
+            
+            // Return in same format as PPOAgent
+            return {
+                action: action,
+                logProb: 0,
+                value: 0
+            };
         }
     };
     
