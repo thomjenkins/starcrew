@@ -1,0 +1,13 @@
+{
+  "rewrites": [
+    {
+      "source": "/canvas",
+      "destination": "/canvas/index.html"
+    },
+    {
+      "source": "/canvas/(.*)",
+      "destination": "/canvas/$1"
+    }
+  ]
+}
+
