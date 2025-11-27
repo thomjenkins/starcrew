@@ -4806,6 +4806,7 @@ function updateTractorBeam() {
 // Process remote players' bullets for damage (host only)
 // Note: Bullet positions are updated by the owner and synced via network
 // This function only processes collisions for damage
+// Deploy: 1933e8d - Multiplayer enabled
 function processRemoteBullets() {
     if (!multiplayerMode || !networkManager || !networkManager.isHostPlayer()) {
         return;
