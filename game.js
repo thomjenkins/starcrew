@@ -5135,6 +5135,93 @@ function processRemoteBullets() {
     });
 }
 
+// Process collisions for remote players (host only)
+function processRemotePlayerCollisions() {
+    if (!multiplayerMode || !networkManager || !networkManager.isHostPlayer()) {
+        return;
+    }
+    
+    // Check collisions between entities and remote players
+    remotePlayers.forEach((remotePlayer, playerId) => {
+        const remotePlayerBounds = {
+            x: remotePlayer.x,
+            y: remotePlayer.y,
+            width: player.width,
+            height: player.height
+        };
+        
+        // Check enemy collisions
+        enemies.forEach(enemy => {
+            if (checkCollision(enemy, remotePlayerBounds)) {
+                // Send damage event to remote player
+                networkManager.sendEvent('playerDamaged', {
+                    damage: enemy.damage,
+                    source: 'enemy',
+                    enemyId: enemy.id
+                }, playerId);
+                sounds.enemyExplosion();
+                createExplosion(enemy.x, enemy.y, 30);
+                gameState.score += 50;
+                gameState.enemiesKilled++;
+                if (gameState.gameMode === 'normal') {
+                    currency += 5;
+                    cumulativeCredits += 5;
+                }
+            }
+        });
+        
+        // Check asteroid collisions
+        asteroids.forEach(asteroid => {
+            if (checkCollision(asteroid, remotePlayerBounds)) {
+                // Send damage event to remote player
+                networkManager.sendEvent('playerDamaged', {
+                    damage: asteroid.width * 0.5,
+                    source: 'asteroid',
+                    asteroidId: asteroid.id
+                }, playerId);
+                sounds.asteroidExplosion();
+                createExplosion(asteroid.x, asteroid.y, asteroid.width);
+                gameState.score += 20;
+                if (gameState.gameMode === 'normal') {
+                    currency += 2;
+                    cumulativeCredits += 2;
+                }
+            }
+        });
+        
+        // Check boss collisions
+        bosses.forEach(boss => {
+            if (checkCollision(boss, remotePlayerBounds)) {
+                // Boss is instant kill
+                networkManager.sendEvent('playerDamaged', {
+                    damage: 9999, // Instant kill
+                    source: 'boss',
+                    bossId: boss.id
+                }, playerId);
+                sounds.enemyExplosion();
+                createExplosion(boss.x, boss.y, 50);
+            }
+        });
+        
+        // Check enemy bullet collisions
+        const enemyBullets = bullets.filter(b => b.type === 'enemy');
+        enemyBullets.forEach(bullet => {
+            if (checkCollision(bullet, remotePlayerBounds)) {
+                // Send damage event to remote player
+                networkManager.sendEvent('playerDamaged', {
+                    damage: bullet.damage,
+                    source: 'enemyBullet'
+                }, playerId);
+                // Remove bullet
+                const index = bullets.indexOf(bullet);
+                if (index > -1) {
+                    bullets.splice(index, 1);
+                }
+            }
+        });
+    });
+}
+
 // Process remote players' tractor beams (host only)
 function processRemoteTractorBeams() {
     if (!multiplayerMode || !networkManager || !networkManager.isHostPlayer()) {
@@ -8890,10 +8977,10 @@ function updateGameStep() {
         updateEnemyBullets(); // Check enemy bullet collisions with local player
         
         // Check collisions with enemies and asteroids (using synced positions from host)
-        // This gives immediate feedback while host is authoritative
+        // Only visual/audio feedback - damage is applied by host via playerDamaged events
         enemies.forEach(enemy => {
             if (checkCollision(enemy, player)) {
-                takeDamage(enemy.damage);
+                // Visual/audio feedback only - host will send damage event
                 sounds.enemyExplosion();
                 createExplosion(enemy.x, enemy.y, 30);
             }
@@ -8901,7 +8988,7 @@ function updateGameStep() {
         
         asteroids.forEach(asteroid => {
             if (checkCollision(asteroid, player)) {
-                takeDamage(asteroid.width * 0.5);
+                // Visual/audio feedback only - host will send damage event
                 sounds.asteroidExplosion();
                 createExplosion(asteroid.x, asteroid.y, asteroid.width);
             }
@@ -8909,7 +8996,7 @@ function updateGameStep() {
         
         bosses.forEach(boss => {
             if (checkCollision(boss, player)) {
-                takeDamage(boss.damage * 2);
+                // Visual/audio feedback only - host will send damage event
                 sounds.enemyExplosion();
                 createExplosion(boss.x, boss.y, 50);
             }
