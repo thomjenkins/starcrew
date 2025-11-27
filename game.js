@@ -9471,6 +9471,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Listen for damage events from host (for non-host players)
     networkManager.on('playerDamaged', (data) => {
+        console.log('[DAMAGE] Received damage event:', data);
         if (!networkManager.isHostPlayer() && data.damage) {
             takeDamage(data.damage);
         }
@@ -9547,6 +9548,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // For non-host players, this replaces all game state from host
     networkManager.on('completeGameStateUpdated', (data) => {
         if (data.completeState && !networkManager.isHostPlayer()) {
+            // Debug: log state sync
+            console.log('[SYNC] Received state:', {
+                enemies: data.completeState.enemies?.length || 0,
+                asteroids: data.completeState.asteroids?.length || 0,
+                bullets: data.completeState.bullets?.length || 0,
+                effects: data.completeState.effects?.length || 0
+            });
+            
             // Replace all game state with host's authoritative state
             if (data.completeState.enemies) enemies = data.completeState.enemies;
             if (data.completeState.asteroids) asteroids = data.completeState.asteroids;
