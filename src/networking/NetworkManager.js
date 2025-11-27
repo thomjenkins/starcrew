@@ -10,6 +10,8 @@ export class NetworkManager {
         this.listeners = [];
         this.lastInputSent = 0;
         this.inputThrottle = 33; // Send inputs every 33ms (~30Hz) - realistic for Firebase
+        this.lastStateSent = 0;
+        this.stateThrottle = 20; // Send player state frequently for smooth remote control
         this.lastEntitySent = 0;
         this.entityThrottle = 33; // Send complete state every 33ms (~30Hz) for reliable sync
     }
@@ -225,6 +227,14 @@ export class NetworkManager {
                     this.notifyListeners('inputReceived', { input });
                 }
             });
+
+            // Listen for authoritative state snapshots from host
+            roomRef.child('completeGameState').on('value', (snapshot) => {
+                const completeState = snapshot.val();
+                if (completeState) {
+                    this.notifyListeners('completeGameStateUpdated', { completeState });
+                }
+            });
         }
         
         // Listen for events (playerDied, playerDamaged, etc.) - all players listen
@@ -248,12 +258,12 @@ export class NetworkManager {
         if (!this.connected || !this.db || !this.roomId || !this.playerId) {
             return;
         }
-        
+
         const now = Date.now();
-        if (now - this.lastInputSent < this.inputThrottle) {
+        if (now - this.lastStateSent < this.stateThrottle) {
             return; // Throttle updates
         }
-        this.lastInputSent = now;
+        this.lastStateSent = now;
         
         try {
             const playerRef = this.db.ref(`rooms/${this.roomId}/players/${this.playerId}`);
