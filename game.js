@@ -8802,6 +8802,53 @@ const TARGET_FPS = 60; // Target frames per second
 const FRAME_TIME_MS = 1000 / TARGET_FPS; // ~16.67ms per frame at 60fps
 let accumulatedTime = 0;
 
+// Host-authoritative sync: broadcast full game state to keep clients aligned
+function broadcastCompleteGameState() {
+    if (!multiplayerMode || !networkManager || !networkManager.isConnected() || !networkManager.isHostPlayer()) {
+        return;
+    }
+
+    // Capture and clear pending effects so they are only played once per broadcast
+    const effectsToSend = pendingEffects.splice(0, pendingEffects.length);
+
+    // Include basic player state for reconciliation on clients
+    const playersState = {};
+    playersState[networkManager.getPlayerId()] = {
+        x: player.x,
+        y: player.y,
+        rotation: player.rotation,
+        health: player.health,
+        shields: player.shields
+    };
+
+    remotePlayers.forEach((remotePlayer, playerId) => {
+        playersState[playerId] = {
+            x: remotePlayer.x,
+            y: remotePlayer.y,
+            rotation: remotePlayer.rotation,
+            health: remotePlayer.health,
+            shields: remotePlayer.shields
+        };
+    });
+
+    networkManager.sendCompleteGameState({
+        enemies,
+        asteroids,
+        bosses,
+        bullets,
+        allies,
+        particles,
+        powerups,
+        nebulas,
+        cargoVessel: gameState.gameMode === 'mission' ? cargoVessel : null,
+        score: gameState.score,
+        level: gameState.level,
+        enemiesKilled: gameState.enemiesKilled,
+        players: playersState,
+        effects: effectsToSend
+    });
+}
+
 function gameLoop(currentTime = performance.now()) {
     if (!canvas) {
         console.error('Canvas not available in gameLoop');
@@ -9021,12 +9068,15 @@ function updateGameStep() {
             shields: player.shields
         });
     }
-    
+
     // Mission mode updates
     if (gameState.gameMode === 'mission') {
         updateCargoVessel();
     }
-    
+
+    // Host broadcasts authoritative state so all players see the same world
+    broadcastCompleteGameState();
+
     // Update UI (skip in headless mode, but allow observer mode)
     if (!HEADLESS_MODE || OBSERVER_MODE) {
         updateUI();
