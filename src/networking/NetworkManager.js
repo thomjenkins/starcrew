@@ -11,7 +11,7 @@ export class NetworkManager {
         this.lastInputSent = 0;
         this.inputThrottle = 16; // Send inputs every 16ms (~60 updates/sec) for smoother sync
         this.lastEntitySent = 0;
-        this.entityThrottle = 33; // Send entities every 33ms (~30 updates/sec) for smoother sync
+        this.entityThrottle = 16; // Send entities every 16ms (~60 updates/sec) for low latency
     }
     
     /**

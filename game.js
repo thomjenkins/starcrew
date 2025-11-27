@@ -1175,18 +1175,18 @@ function updatePlayer() {
     // For non-host players in multiplayer, shooting is handled by host
     // Host processes input and creates bullets, so non-host players don't create bullets locally
     if (!multiplayerMode || !networkManager || networkManager.isHostPlayer()) {
-        // Mouse button or spacebar for primary weapon
-        if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0) {
-            shoot('primary');
-        }
-        if (keys['1'] && weapons.missile.cooldown === 0 && weapons.missile.ammo > 0) {
-            shoot('missile');
-        }
-        if (keys['2'] && weapons.laser.cooldown === 0 && weapons.laser.ammo > 0) {
-            shoot('laser');
-        }
-        if (keys['3'] && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
-            shoot('cluster');
+    // Mouse button or spacebar for primary weapon
+    if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0) {
+        shoot('primary');
+    }
+    if (keys['1'] && weapons.missile.cooldown === 0 && weapons.missile.ammo > 0) {
+        shoot('missile');
+    }
+    if (keys['2'] && weapons.laser.cooldown === 0 && weapons.laser.ammo > 0) {
+        shoot('laser');
+    }
+    if (keys['3'] && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
+        shoot('cluster');
         }
     }
     
@@ -2614,6 +2614,7 @@ function updateEnemies() {
             return false;
         }
         
+        
         // Check collision with allies
         for (let i = 0; i < allies.length; i++) {
             const ally = allies[i];
@@ -2905,6 +2906,7 @@ function updateAsteroids() {
             }
             return false;
         }
+        
         
         // Check collision with cargo vessel in mission mode
         if (gameState.gameMode === 'mission' && cargoVessel && checkCollision(asteroid, cargoVessel)) {
@@ -8874,17 +8876,54 @@ function gameLoop(currentTime = performance.now()) {
 
 // Helper function to update game logic in one step
 function updateGameStep() {
-    // For non-host players in multiplayer: Only update local player (client-side prediction)
-    // All other game state comes from host
+    // For non-host players in multiplayer: Update local player and run collision detection
+    // Entity positions come from host, but we run collision detection locally for responsiveness
     if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
-        // Only update local player for client-side prediction (instant feel)
+        // Update local player for client-side prediction (instant feel)
         updatePlayer();
+        
+        // Update bullets (they come from host, but we need to update positions locally)
+        updateBullets();
+        
+        // Run collision detection locally for immediate feedback
+        // Entity positions are synced from host, but we check collisions locally
+        updateEnemyBullets(); // Check enemy bullet collisions with local player
+        
+        // Check collisions with enemies and asteroids (using synced positions from host)
+        // This gives immediate feedback while host is authoritative
+        enemies.forEach(enemy => {
+            if (checkCollision(enemy, player)) {
+                takeDamage(enemy.damage);
+                sounds.enemyExplosion();
+                createExplosion(enemy.x, enemy.y, 30);
+            }
+        });
+        
+        asteroids.forEach(asteroid => {
+            if (checkCollision(asteroid, player)) {
+                takeDamage(asteroid.width * 0.5);
+                sounds.asteroidExplosion();
+                createExplosion(asteroid.x, asteroid.y, asteroid.width);
+            }
+        });
+        
+        bosses.forEach(boss => {
+            if (checkCollision(boss, player)) {
+                takeDamage(boss.damage * 2);
+                sounds.enemyExplosion();
+                createExplosion(boss.x, boss.y, 50);
+            }
+        });
+        
+        // Update particles and other visual effects
+        updateParticles();
+        updateFireworks();
         
         // Update UI (skip in headless mode, but allow observer mode)
         if (!HEADLESS_MODE || OBSERVER_MODE) {
             updateUI();
         }
-        return; // Skip all other game logic - host is authoritative
+        return; // Skip entity position updates - host is authoritative for positions
     }
     
     // Host runs full game loop
@@ -8895,9 +8934,7 @@ function updateGameStep() {
     // Host processes remote players' actions
     if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
         processRemotePlayerShooting(); // Process shooting input and create bullets on host
-        // Note: Bullets created by remote players are now in the main bullets array
-        // and will be processed by normal collision detection in updateBullets()
-        // processRemoteBullets() is no longer needed since bullets are created on host
+        processRemotePlayerCollisions(); // Process collisions for remote players
         processRemoteTractorBeams();
     }
     
@@ -9289,6 +9326,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Trigger game over for all players when any player dies
         if (gameState.running) {
             gameOver();
+        }
+    });
+    
+    // Listen for damage events from host (for non-host players)
+    networkManager.on('playerDamaged', (data) => {
+        if (!networkManager.isHostPlayer() && data.damage) {
+            takeDamage(data.damage);
         }
     });
     
