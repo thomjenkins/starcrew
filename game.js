@@ -5517,13 +5517,23 @@ function drawRemotePlayers() {
             );
             
             // Draw remote player ship (different color to distinguish)
-            const remoteColor = new Float32Array([1, 0.5, 0, 1]); // Orange tint for remote players
+            // Use a lighter orange tint that's more visible
+            const remoteColor = new Float32Array([1.0, 0.7, 0.3, 1.0]); // Orange tint for remote players
             if (textures.ship) {
                 spriteRenderer.drawSprite(
                     remotePlayer.x, remotePlayer.y,
                     player.width, player.height,
                     remotePlayer.rotation || 0,
                     textures.ship,
+                    remoteColor
+                );
+            } else {
+                // Fallback: draw colored rectangle
+                spriteRenderer.drawRect(
+                    remotePlayer.x - player.width / 2,
+                    remotePlayer.y - player.height / 2,
+                    player.width,
+                    player.height,
                     remoteColor
                 );
             }
@@ -5552,9 +5562,9 @@ function drawRemotePlayers() {
             // Draw remote player ship (orange tint)
             ctx.globalCompositeOperation = 'source-over';
             ctx.globalAlpha = 1;
-            ctx.fillStyle = 'rgba(255, 128, 0, 0.8)'; // Orange tint
+            
             if (playerShipImageLoaded && playerShipImage) {
-                ctx.globalCompositeOperation = 'multiply';
+                // Draw the ship image first
                 ctx.drawImage(
                     playerShipImage,
                     -player.width / 2,
@@ -5562,10 +5572,26 @@ function drawRemotePlayers() {
                     player.width,
                     player.height
                 );
+                
+                // Apply orange tint overlay
+                ctx.globalCompositeOperation = 'source-atop';
+                ctx.fillStyle = 'rgba(255, 180, 80, 0.6)'; // Orange tint overlay
+                ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
                 ctx.globalCompositeOperation = 'source-over';
             } else {
-                // Fallback shape
-                ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
+                // Fallback: draw orange triangle shape
+                ctx.fillStyle = '#ff8844'; // Orange color
+                ctx.beginPath();
+                ctx.moveTo(0, -player.height / 2);
+                ctx.lineTo(-player.width / 2, player.height / 2);
+                ctx.lineTo(0, player.height / 2 - 5);
+                ctx.lineTo(player.width / 2, player.height / 2);
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.strokeStyle = '#ffaa66';
+                ctx.lineWidth = 2;
+                ctx.stroke();
             }
             
             ctx.restore();
