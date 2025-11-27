@@ -1199,6 +1199,22 @@ function updatePlayer() {
             playerId: networkManager.getPlayerId()
         }));
         
+        // Prepare tractor beam state for sync
+        let tractorBeamState = null;
+        if (tractorBeam.active && tractorBeam.target) {
+            // Send target ID so host can find the target entity
+            tractorBeamState = {
+                active: true,
+                targetId: tractorBeam.target.id || null,
+                targetType: tractorBeam.targetType,
+                playerX: player.x,
+                playerY: player.y,
+                playerRotation: player.rotation
+            };
+        } else {
+            tractorBeamState = { active: false };
+        }
+        
         networkManager.sendPlayerState({
             x: player.x,
             y: player.y,
@@ -1215,7 +1231,9 @@ function updatePlayer() {
             },
             // Send allies and bullets for other players to see
             allies: alliesWithPlayerId,
-            bullets: bulletsWithPlayerId
+            bullets: bulletsWithPlayerId,
+            // Send tractor beam state so host can process it
+            tractorBeam: tractorBeamState
         });
     }
     
@@ -4783,6 +4801,175 @@ function updateTractorBeam() {
         tractorBeam.target.vx *= bossDamping;
         tractorBeam.target.vy *= bossDamping;
     }
+}
+
+// Process remote players' bullets for damage (host only)
+// Note: Bullet positions are updated by the owner and synced via network
+// This function only processes collisions for damage
+function processRemoteBullets() {
+    if (!multiplayerMode || !networkManager || !networkManager.isHostPlayer()) {
+        return;
+    }
+    
+    // Process bullets from all remote players
+    remoteBullets.forEach((remoteBulletsList, playerId) => {
+        remoteBulletsList.forEach(bullet => {
+            // Check collisions with enemies
+            if (bullet.type === 'primary' || bullet.type === 'missile' || bullet.type === 'laser' || bullet.type === 'ally' || bullet.type === 'cluster') {
+                for (let i = 0; i < enemies.length; i++) {
+                    const enemy = enemies[i];
+                    if (checkCollision(bullet, enemy)) {
+                        enemy.health -= bullet.damage;
+                        
+                        // Cluster weapon spread effect
+                        if (bullet.type === 'cluster' && bullet.clusterSpread) {
+                            createExplosion(bullet.x, bullet.y, 30);
+                            sounds.enemyExplosion();
+                            
+                            // Spread to nearby enemies
+                            const spreadRadius = weapons.cluster.spreadRadius || 80;
+                            const spreadDamage = bullet.damage * 0.7;
+                            const hitEnemies = new Set([i]);
+                            
+                            function spreadCluster(centerX, centerY, depth) {
+                                if (depth > 3) return;
+                                
+                                for (let j = 0; j < enemies.length; j++) {
+                                    if (hitEnemies.has(j)) continue;
+                                    
+                                    const dist = Math.hypot(enemies[j].x - centerX, enemies[j].y - centerY);
+                                    if (dist < spreadRadius) {
+                                        enemies[j].health -= spreadDamage;
+                                        hitEnemies.add(j);
+                                        createExplosion(enemies[j].x, enemies[j].y, 20);
+                                        spreadCluster(enemies[j].x, enemies[j].y, depth + 1);
+                                    }
+                                }
+                            }
+                            
+                            spreadCluster(bullet.x, bullet.y, 0);
+                        } else if (!bullet.pierce && bullet.type !== 'cluster') {
+                            createExplosion(bullet.x, bullet.y, 10);
+                        } else if (bullet.type === 'cluster') {
+                            createExplosion(bullet.x, bullet.y, 30);
+                        }
+                    }
+                }
+                
+                // Check collisions with bosses
+                for (let i = 0; i < bosses.length; i++) {
+                    const boss = bosses[i];
+                    if (checkCollision(bullet, boss)) {
+                        boss.health -= bullet.damage;
+                        
+                        if (!bullet.pierce && bullet.type !== 'cluster') {
+                            createExplosion(bullet.x, bullet.y, 10);
+                        } else if (bullet.type === 'cluster') {
+                            createExplosion(bullet.x, bullet.y, 30);
+                        }
+                    }
+                }
+            }
+            
+            // Check collisions with asteroids
+            if (bullet.type === 'primary' || bullet.type === 'missile' || bullet.type === 'laser' || bullet.type === 'ally' || bullet.type === 'cluster') {
+                for (let i = 0; i < asteroids.length; i++) {
+                    const asteroid = asteroids[i];
+                    if (checkCollision(bullet, asteroid)) {
+                        asteroid.health -= bullet.damage;
+                        
+                        if (!bullet.pierce && bullet.type !== 'cluster') {
+                            createExplosion(bullet.x, bullet.y, 10);
+                        } else if (bullet.type === 'cluster') {
+                            createExplosion(bullet.x, bullet.y, 30);
+                        }
+                    }
+                }
+            }
+        });
+    });
+}
+
+// Process remote players' tractor beams (host only)
+function processRemoteTractorBeams() {
+    if (!multiplayerMode || !networkManager || !networkManager.isHostPlayer()) {
+        return;
+    }
+    
+    // Process tractor beams from all remote players
+    remotePlayers.forEach((remotePlayer, playerId) => {
+        if (!remotePlayer.tractorBeam || !remotePlayer.tractorBeam.active) {
+            return;
+        }
+        
+        const tb = remotePlayer.tractorBeam;
+        if (!tb.targetId || !tb.targetType) {
+            return;
+        }
+        
+        // Find the target entity by ID
+        let target = null;
+        if (tb.targetType === 'enemy') {
+            target = enemies.find(e => e.id === tb.targetId);
+        } else if (tb.targetType === 'asteroid') {
+            target = asteroids.find(a => a.id === tb.targetId);
+        } else if (tb.targetType === 'boss') {
+            target = bosses.find(b => b.id === tb.targetId);
+        }
+        
+        if (!target) {
+            return; // Target not found or destroyed
+        }
+        
+        // Calculate remote player's front position
+        const frontX = remotePlayer.x + Math.sin(remotePlayer.rotation) * (player.height / 2);
+        const frontY = remotePlayer.y - Math.cos(remotePlayer.rotation) * (player.height / 2);
+        
+        const dx = target.x - frontX;
+        const dy = target.y - frontY;
+        const dist = Math.hypot(dx, dy);
+        
+        // Check if target is in range
+        if (dist > tractorBeam.range) {
+            return;
+        }
+        
+        // Apply pull force based on target type
+        if (tb.targetType === 'asteroid') {
+            const pullForce = 0.05;
+            const pullX = -(dx / dist) * pullForce;
+            const pullY = -(dy / dist) * pullForce;
+            
+            target.vx += pullX;
+            target.vy += pullY;
+            
+            const damping = 0.95;
+            target.vx *= damping;
+            target.vy *= damping;
+        } else if (tb.targetType === 'enemy') {
+            const pullForce = 0.08;
+            const pullX = -(dx / dist) * pullForce;
+            const pullY = -(dy / dist) * pullForce;
+            
+            target.vx += pullX;
+            target.vy += pullY;
+            
+            const damping = 0.96;
+            target.vx *= damping;
+            target.vy *= damping;
+        } else if (tb.targetType === 'boss') {
+            const pullForce = 0.1;
+            const pullX = -(dx / dist) * pullForce;
+            const pullY = -(dy / dist) * pullForce;
+            
+            target.vx += pullX;
+            target.vy += pullY;
+            
+            const damping = 0.97;
+            target.vx *= damping;
+            target.vy *= damping;
+        }
+    });
 }
 
 function collectPowerup(type) {
@@ -8375,6 +8562,13 @@ function updateGameStep() {
     updatePlayer();
     updateTractorBeam();
     updateBullets();
+    
+    // Host processes remote players' actions
+    if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
+        processRemoteBullets();
+        processRemoteTractorBeams();
+    }
+    
     updateEnemies();
     updateBosses();
     updateAsteroids();
