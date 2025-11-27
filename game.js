@@ -3267,6 +3267,7 @@ function getNearestObjects(objects, count) {
 
 // Apply agent action to game
 function applyAgentAction(action) {
+    console.log('applyAgentAction called with action:', action);
     // Clear previous input state
     const prevKeys = {...keys};
     const prevMouseButton = mouseButtonDown;
@@ -3355,7 +3356,21 @@ function applyAgentAction(action) {
         case ACTIONS.SELECT_UPGRADE_CARGO_ALLY:
             selectUpgradeAgent('cargoAlly');
             break;
+        default:
+            console.warn('Unknown action:', action);
+            break;
     }
+    console.log('Keys after applyAgentAction:', {
+        w: keys['w'],
+        a: keys['a'],
+        s: keys['s'],
+        d: keys['d'],
+        space: keys[' '],
+        arrowup: keys['arrowup'],
+        arrowdown: keys['arrowdown'],
+        arrowleft: keys['arrowleft'],
+        arrowright: keys['arrowright']
+    });
 }
 
 // Agent upgrade selection function
@@ -3520,6 +3535,7 @@ let prevEnemiesKilled = 0;
 async function autopilotStep() {
     if (!rlAgent) {
         // No agent loaded yet - autopilot disabled
+        console.warn('Autopilot: rlAgent is null, disabling autopilot');
         autopilotEnabled = false;
         updateAutopilotUI();
         return;
@@ -3549,11 +3565,14 @@ async function autopilotStep() {
             const exploreChance = 0.05;
             const deterministic = !(Math.random() < exploreChance);
             result = await rlAgent.getAction(observation, deterministic);
+            console.log('Autopilot action:', result.action, 'Observation (first 5):', observation.slice(0, 5), 'deterministic:', deterministic);
             applyAgentAction(result.action);
         } else if (rlAgent.getAction && typeof rlAgent.getAction === 'function') {
             result = await rlAgent.getAction(observation, true);
+            console.log('Autopilot action (non-PPO):', result.action, 'Observation (first 5):', observation.slice(0, 5));
             applyAgentAction(result.action);
         } else {
+            console.warn('Autopilot: rlAgent does not have getAction method or is not PPOAgent');
             autopilotInferencePending = false;
             return;
         }
