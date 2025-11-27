@@ -234,6 +234,7 @@ let multiplayerMode = false;
 let remoteCrewAllocations = new Map(); // Remote players' crew allocations: {playerId: {engineering: count, navigation: count}}
 let remoteAllies = new Map(); // Remote allies: {playerId: [ally1, ally2, ...]}
 let remoteBullets = new Map(); // Remote bullets: {playerId: [bullet1, bullet2, ...]}
+let previousRemoteAllies = new Map(); // Track previous ally states to detect destruction
 
 // Firebase configuration
 const firebaseConfig = {
@@ -8677,9 +8678,44 @@ document.addEventListener('DOMContentLoaded', async () => {
                 remoteCrewAllocations.set(data.player.id, data.player.cargoCrewAllocation);
             }
             
-            // Store remote allies if present
+            // Detect destroyed remote allies and show explosions
+            const previousAllies = previousRemoteAllies.get(data.player.id) || [];
+            const currentAllies = data.player.allies || [];
+            
+            // Find allies that were destroyed (in previous but not in current)
+            previousAllies.forEach(prevAlly => {
+                // Check if this ally still exists in current list
+                // Match by ID if available, or by position if close enough
+                const stillExists = currentAllies.some(currAlly => {
+                    if (prevAlly.id && currAlly.id) {
+                        return currAlly.id === prevAlly.id;
+                    }
+                    // Fallback: check if position is very close (within 5 pixels)
+                    const dist = Math.hypot(currAlly.x - prevAlly.x, currAlly.y - prevAlly.y);
+                    return dist < 5;
+                });
+                
+                if (!stillExists) {
+                    // Ally was destroyed - show explosion at last known position
+                    createExplosion(prevAlly.x, prevAlly.y, 25);
+                    sounds.enemyExplosion();
+                }
+            });
+            
+            // Store current allies as previous for next comparison
             if (data.player.allies && Array.isArray(data.player.allies)) {
+                // Deep copy allies for comparison
+                previousRemoteAllies.set(data.player.id, data.player.allies.map(a => ({
+                    x: a.x,
+                    y: a.y,
+                    id: a.id || null,
+                    health: a.health,
+                    maxHealth: a.maxHealth
+                })));
                 remoteAllies.set(data.player.id, data.player.allies);
+            } else {
+                previousRemoteAllies.delete(data.player.id);
+                remoteAllies.delete(data.player.id);
             }
             
             // Store remote bullets if present
@@ -8699,6 +8735,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         remoteCrewAllocations.delete(data.playerId);
         remoteAllies.delete(data.playerId);
         remoteBullets.delete(data.playerId);
+        previousRemoteAllies.delete(data.playerId); // Clean up tracking
         updatePlayerCountUI();
         
         // Update UI if command module is open
@@ -8710,15 +8747,62 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Listen for game entity updates (enemies, asteroids, bosses, cargo vessel) from host
     networkManager.on('gameEntitiesUpdated', (data) => {
         if (data.entities) {
-            // Replace local arrays with host's synchronized entities
+            // Preserve tractor beam target if active
+            let preservedTractorTarget = null;
+            let preservedTractorTargetType = null;
+            if (tractorBeam.active && tractorBeam.target) {
+                preservedTractorTarget = tractorBeam.target;
+                preservedTractorTargetType = tractorBeam.targetType;
+            }
+            
+            // Sync entities
             if (data.entities.enemies) {
                 enemies = data.entities.enemies;
+                // Restore tractor beam target if it still exists
+                if (preservedTractorTarget && preservedTractorTargetType === 'enemy') {
+                    const targetId = preservedTractorTarget.id;
+                    const newTarget = enemies.find(e => e.id === targetId);
+                    if (newTarget) {
+                        tractorBeam.target = newTarget;
+                    } else {
+                        // Target was destroyed, deactivate tractor beam
+                        tractorBeam.active = false;
+                        tractorBeam.target = null;
+                        tractorBeam.targetType = null;
+                    }
+                }
             }
             if (data.entities.asteroids) {
                 asteroids = data.entities.asteroids;
+                // Restore tractor beam target if it still exists
+                if (preservedTractorTarget && preservedTractorTargetType === 'asteroid') {
+                    const targetId = preservedTractorTarget.id;
+                    const newTarget = asteroids.find(a => a.id === targetId);
+                    if (newTarget) {
+                        tractorBeam.target = newTarget;
+                    } else {
+                        // Target was destroyed, deactivate tractor beam
+                        tractorBeam.active = false;
+                        tractorBeam.target = null;
+                        tractorBeam.targetType = null;
+                    }
+                }
             }
             if (data.entities.bosses) {
                 bosses = data.entities.bosses;
+                // Restore tractor beam target if it still exists
+                if (preservedTractorTarget && preservedTractorTargetType === 'boss') {
+                    const targetId = preservedTractorTarget.id;
+                    const newTarget = bosses.find(b => b.id === targetId);
+                    if (newTarget) {
+                        tractorBeam.target = newTarget;
+                    } else {
+                        // Target was destroyed, deactivate tractor beam
+                        tractorBeam.active = false;
+                        tractorBeam.target = null;
+                        tractorBeam.targetType = null;
+                    }
+                }
             }
             // Sync cargo vessel (only in mission mode)
             if (data.entities.cargoVessel && gameState.gameMode === 'mission') {
