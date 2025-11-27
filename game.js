@@ -5538,11 +5538,12 @@ function drawRemotePlayers() {
             // Check if texture exists and is valid
             if (textures.ship && spriteRenderer.gl && spriteRenderer.gl.isTexture(textures.ship)) {
                 spriteRenderer.drawSprite(
+                    textures.ship,  // texture first!
                     remotePlayer.x, remotePlayer.y,
                     player.width, player.height,
                     remotePlayer.rotation || 0,
-                    textures.ship,
-                    remoteColor
+                    remoteColor,  // color
+                    0.5, 0.5  // origin
                 );
             }
         });
