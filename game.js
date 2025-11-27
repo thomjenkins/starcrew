@@ -103,7 +103,14 @@ let gameState = {
     gameMode: 'normal', // 'normal' or 'mission'
     missionComplete: false,
     commandModuleOpen: false,
-    journeyCount: 0 // For mission mode
+    journeyCount: 0, // For mission mode
+    // Mission 1 state
+    mission1Active: false,
+    mission1Kills: 0,
+    mission1StartTime: null,
+    mission1TimeLimit: 180000, // 3 minutes in milliseconds
+    mission1VideoShown: false,
+    mission1Completed: false
 };
 
 // Background image
@@ -2617,6 +2624,15 @@ function updateEnemies() {
             createExplosion(enemy.x, enemy.y, 30);
             gameState.score += 50;
             gameState.enemiesKilled++;
+            
+            // Track mission 1 kills
+            if (gameState.mission1Active) {
+                gameState.mission1Kills++;
+                if (gameState.mission1Kills >= 5) {
+                    completeMission1();
+                }
+            }
+            
             // Award credits in normal mode
             if (gameState.gameMode === 'normal') {
                 currency += 5;
@@ -2637,6 +2653,14 @@ function updateEnemies() {
                 createExplosion(enemy.x, enemy.y, 30);
                 gameState.score += 50;
                 gameState.enemiesKilled++;
+                
+                // Track mission 1 kills
+                if (gameState.mission1Active) {
+                    gameState.mission1Kills++;
+                    if (gameState.mission1Kills >= 5) {
+                        completeMission1();
+                    }
+                }
                 
                 // Check if ally is destroyed
                 if (ally.health <= 0) {
@@ -2662,6 +2686,15 @@ function updateEnemies() {
             createExplosion(enemy.x, enemy.y, 30);
             gameState.score += 50;
             gameState.enemiesKilled++;
+            
+            // Track mission 1 kills
+            if (gameState.mission1Active) {
+                gameState.mission1Kills++;
+                if (gameState.mission1Kills >= 5) {
+                    completeMission1();
+                }
+            }
+            
             return false;
         }
 
@@ -2670,6 +2703,15 @@ function updateEnemies() {
             createExplosion(enemy.x, enemy.y, 30);
             gameState.score += 50;
             gameState.enemiesKilled++;
+            
+            // Track mission 1 kills
+            if (gameState.mission1Active) {
+                gameState.mission1Kills++;
+                if (gameState.mission1Kills >= 5) {
+                    completeMission1();
+                }
+            }
+            
             // Award credits in normal mode
             if (gameState.gameMode === 'normal') {
                 currency += 5;
@@ -7600,6 +7642,282 @@ function drawCargoVessel() {
     }
 }
 
+// Mission 1: Alien Transmission and Enemy Elimination
+let mission1VideoElement = null;
+let mission1VideoOverlay = null;
+
+function checkMission1Trigger() {
+    // Check if score reached 350 and video hasn't been shown
+    if (gameState.score >= 350 && !gameState.mission1VideoShown && !gameState.mission1Active && !gameState.mission1Completed) {
+        gameState.mission1VideoShown = true;
+        playMission1Video();
+    }
+}
+
+function playMission1Video() {
+    // Pause the game
+    gameState.paused = true;
+    
+    // Create video overlay
+    mission1VideoOverlay = document.createElement('div');
+    mission1VideoOverlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.95);
+        z-index: 10000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    `;
+    
+    // Create video element
+    mission1VideoElement = document.createElement('video');
+    mission1VideoElement.src = 'mission1.mov';
+    mission1VideoElement.style.cssText = `
+        max-width: 90%;
+        max-height: 90%;
+    `;
+    mission1VideoElement.controls = false;
+    mission1VideoElement.autoplay = true;
+    
+    // When video ends, start mission
+    mission1VideoElement.addEventListener('ended', () => {
+        startMission1();
+    });
+    
+    // Handle video errors
+    mission1VideoElement.addEventListener('error', (e) => {
+        console.warn('Failed to load mission1.mov, starting mission anyway:', e);
+        startMission1();
+    });
+    
+    mission1VideoOverlay.appendChild(mission1VideoElement);
+    document.body.appendChild(mission1VideoOverlay);
+    
+    // Play video
+    mission1VideoElement.play().catch(err => {
+        console.warn('Failed to play video:', err);
+        startMission1();
+    });
+}
+
+function startMission1() {
+    // Remove video overlay
+    if (mission1VideoOverlay) {
+        mission1VideoOverlay.remove();
+        mission1VideoOverlay = null;
+    }
+    mission1VideoElement = null;
+    
+    // Initialize mission state
+    gameState.mission1Active = true;
+    gameState.mission1Kills = 0;
+    gameState.mission1StartTime = Date.now();
+    
+    // Spawn 7 enemies around cargo ship
+    spawnMission1Enemies();
+    
+    // Resume game
+    gameState.paused = false;
+    
+    // Show mission UI
+    showMission1UI();
+}
+
+function spawnMission1Enemies() {
+    // Get cargo ship position (use center of canvas if cargo ship doesn't exist)
+    let centerX, centerY;
+    if (cargoVessel) {
+        centerX = cargoVessel.x;
+        centerY = cargoVessel.y;
+    } else {
+        centerX = getCanvasWidth() / 2;
+        centerY = getCanvasHeight() / 2;
+    }
+    
+    const spawnRadius = 200; // Distance from cargo ship
+    const angleStep = (Math.PI * 2) / 7; // 7 enemies evenly spaced
+    
+    for (let i = 0; i < 7; i++) {
+        const angle = i * angleStep;
+        const x = centerX + Math.cos(angle) * spawnRadius;
+        const y = centerY + Math.sin(angle) * spawnRadius;
+        
+        // Spawn enemy at this position
+        const creditDifficulty = cumulativeCredits / 100;
+        const difficulty = creditDifficulty * 0.05;
+        const hue = getRandom() * 60;
+        
+        enemies.push({
+            id: 'mission1_enemy_' + i + '_' + Date.now(),
+            x: x,
+            y: y,
+            width: 30 + getRandom() * 20,
+            height: 30 + getRandom() * 20,
+            vx: (getRandom() - 0.5) * 0.5,
+            vy: (getRandom() - 0.5) * 0.5,
+            health: 20 + creditDifficulty * 8,
+            maxHealth: 20 + creditDifficulty * 8,
+            color: `hsl(${hue}, 70%, 50%)`,
+            glowColor: `hsl(${hue}, 100%, 60%)`,
+            shootCooldown: Math.max(40, 150 - creditDifficulty * 2),
+            damage: 6 + creditDifficulty * 1.5,
+            rotation: 0,
+            targetRotation: 0,
+            lastNebulaDamageTime: 0,
+            pursuitSpeed: 0.4 + difficulty * 0.3,
+            targetType: null,
+            targetSwitchCooldown: 0,
+            circleDirection: getRandom() < 0.5 ? 1 : -1
+        });
+    }
+}
+
+function updateMission1() {
+    if (!gameState.mission1Active) return;
+    
+    const elapsed = Date.now() - gameState.mission1StartTime;
+    
+    // Check if time limit exceeded
+    if (elapsed >= gameState.mission1TimeLimit) {
+        failMission1();
+    }
+    
+    // Update mission UI
+    updateMission1UI();
+}
+
+function completeMission1() {
+    if (!gameState.mission1Active || gameState.mission1Completed) return;
+    
+    gameState.mission1Active = false;
+    gameState.mission1Completed = true;
+    
+    // Show success message
+    showMission1Complete();
+    
+    // Hide mission UI after delay
+    setTimeout(() => {
+        hideMission1UI();
+    }, 5000);
+}
+
+function failMission1() {
+    if (!gameState.mission1Active || gameState.mission1Completed) return;
+    
+    gameState.mission1Active = false;
+    
+    // Show failure message
+    showMission1Failed();
+    
+    // Hide mission UI after delay
+    setTimeout(() => {
+        hideMission1UI();
+    }, 5000);
+}
+
+function showMission1UI() {
+    let missionUI = document.getElementById('mission1UI');
+    if (!missionUI) {
+        missionUI = document.createElement('div');
+        missionUI.id = 'mission1UI';
+        missionUI.style.cssText = `
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #ffaa00;
+            border-radius: 10px;
+            padding: 15px 25px;
+            color: #ffaa00;
+            font-family: 'Courier New', monospace;
+            font-size: 18px;
+            z-index: 1000;
+            text-align: center;
+        `;
+        document.body.appendChild(missionUI);
+    }
+    missionUI.style.display = 'block';
+    updateMission1UI();
+}
+
+function updateMission1UI() {
+    const missionUI = document.getElementById('mission1UI');
+    if (!missionUI || !gameState.mission1Active) return;
+    
+    const elapsed = Date.now() - gameState.mission1StartTime;
+    const remaining = Math.max(0, gameState.mission1TimeLimit - elapsed);
+    const minutes = Math.floor(remaining / 60000);
+    const seconds = Math.floor((remaining % 60000) / 1000);
+    
+    missionUI.innerHTML = `
+        <div style="font-weight: bold; margin-bottom: 5px;">MISSION: ELIMINATE ALIEN THREAT</div>
+        <div>Kills: ${gameState.mission1Kills}/5</div>
+        <div>Time: ${minutes}:${seconds.toString().padStart(2, '0')}</div>
+    `;
+}
+
+function hideMission1UI() {
+    const missionUI = document.getElementById('mission1UI');
+    if (missionUI) {
+        missionUI.style.display = 'none';
+    }
+}
+
+function showMission1Complete() {
+    const message = document.createElement('div');
+    message.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.9);
+        border: 3px solid #00ff00;
+        border-radius: 15px;
+        padding: 30px 50px;
+        color: #00ff00;
+        font-family: 'Courier New', monospace;
+        font-size: 24px;
+        z-index: 10001;
+        text-align: center;
+    `;
+    message.textContent = 'MISSION COMPLETE!';
+    document.body.appendChild(message);
+    
+    setTimeout(() => {
+        message.remove();
+    }, 5000);
+}
+
+function showMission1Failed() {
+    const message = document.createElement('div');
+    message.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.9);
+        border: 3px solid #ff0000;
+        border-radius: 15px;
+        padding: 30px 50px;
+        color: #ff0000;
+        font-family: 'Courier New', monospace;
+        font-size: 24px;
+        z-index: 10001;
+        text-align: center;
+    `;
+    message.textContent = 'MISSION FAILED - TIME EXPIRED';
+    document.body.appendChild(message);
+    
+    setTimeout(() => {
+        message.remove();
+    }, 5000);
+}
+
 function drawPlanets() {
     if (gameState.gameMode !== 'mission') return;
     
@@ -9083,6 +9401,14 @@ function updateGameStep() {
     updateParticles();
     updateEnemyBullets();
     updateFireworks();
+    
+    // Check for mission 1 trigger (score 350)
+    checkMission1Trigger();
+    
+    // Update mission 1 timer and check for failure
+    if (gameState.mission1Active) {
+        updateMission1();
+    }
 
     // In deterministic lockstep, both players process damage locally (it's deterministic)
     // Only use host-authoritative processing in non-lockstep mode
