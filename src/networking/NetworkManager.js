@@ -214,6 +214,14 @@ export class NetworkManager {
                     this.notifyListeners('inputReceived', { input });
                 }
             });
+
+            // Listen for authoritative state snapshots from host
+            roomRef.child('completeGameState').on('value', (snapshot) => {
+                const completeState = snapshot.val();
+                if (completeState) {
+                    this.notifyListeners('completeGameStateUpdated', { completeState });
+                }
+            });
         }
         
         // Listen for events (playerDied, playerDamaged, etc.) - all players listen
