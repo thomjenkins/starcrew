@@ -2232,17 +2232,6 @@ function drawNebulas() {
                             ]);
                         }
                         
-                        // Debug: Log first sprite color of first nebula
-                        if (nebulaIndex === 0 && s === 0 && blob === nebula.cloudBlobs[0]) {
-                            console.log('Sprite color debug:', {
-                                spriteProgress,
-                                baseColor: [baseColorParsed[0], baseColorParsed[1], baseColorParsed[2]],
-                                glowColor: [glowColorParsed[0], glowColorParsed[1], glowColorParsed[2]],
-                                finalColor: [spriteColor[0], spriteColor[1], spriteColor[2]],
-                                alpha: spriteColor[3]
-                            });
-                        }
-                        
                         // Draw organic-shaped sprite (rectangle at angle) with rounded edges
                         nebulaRenderer.drawSprite(
                             offsetX, offsetY,
