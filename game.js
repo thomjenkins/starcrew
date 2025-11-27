@@ -25,6 +25,65 @@ const HEADLESS_MODE = urlParams.get('headless') === '1';
 const OBSERVER_MODE = urlParams.get('observe') === '1';
 const SPEED_MULTIPLIER = OFFLINE_MODE && HEADLESS_MODE ? parseFloat(urlParams.get('speed') || '5') : 1;
 
+// Deterministic RNG for lockstep multiplayer
+class DeterministicRNG {
+    constructor(seed = 12345) {
+        this.seed = seed;
+    }
+    
+    // Linear congruential generator (deterministic)
+    next() {
+        this.seed = (this.seed * 1664525 + 1013904223) % Math.pow(2, 32);
+        return this.seed / Math.pow(2, 32);
+    }
+    
+    // Random number between 0 and 1
+    random() {
+        return this.next();
+    }
+    
+    // Random number between min and max
+    randomRange(min, max) {
+        return min + this.random() * (max - min);
+    }
+    
+    // Random integer between min (inclusive) and max (exclusive)
+    randomInt(min, max) {
+        return Math.floor(min + this.random() * (max - min));
+    }
+}
+
+// Global deterministic RNG (seeded at game start)
+let deterministicRNG = new DeterministicRNG(Date.now());
+
+// In multiplayer, use shared seed from room
+let gameSeed = null;
+let gameTick = 0; // Current game tick for lockstep
+
+// Wrapper for random number generation - uses deterministic RNG in multiplayer
+function getRandom() {
+    if (multiplayerMode && gameSeed !== null) {
+        return deterministicRNG.random();
+    }
+    return Math.random();
+}
+
+// Helper to get random range
+function getRandomRange(min, max) {
+    if (multiplayerMode && gameSeed !== null) {
+        return deterministicRNG.randomRange(min, max);
+    }
+    return min + Math.random() * (max - min);
+}
+
+// Helper to get random int
+function getRandomInt(min, max) {
+    if (multiplayerMode && gameSeed !== null) {
+        return deterministicRNG.randomInt(min, max);
+    }
+    return Math.floor(min + Math.random() * (max - min));
+}
+
 // Game state
 let gameState = {
     running: true,
@@ -227,7 +286,7 @@ function initCrewImage() {
     crew1Image.src = 'crew1.png';
 }
 
-// Multiplayer
+// Multiplayer - Deterministic Lockstep
 let networkManager = null;
 let remotePlayers = new Map(); // Other players: {id: {x, y, rotation, health, shields, ...}}
 let multiplayerMode = false;
@@ -236,6 +295,11 @@ let remoteAllies = new Map(); // Remote allies: {playerId: [ally1, ally2, ...]}
 let remoteBullets = new Map(); // Remote bullets: {playerId: [bullet1, bullet2, ...]}
 let previousRemoteAllies = new Map(); // Track previous ally states to detect destruction
 let remotePlayerWeapons = new Map(); // Track remote player weapon states: {playerId: {primary: {cooldown, ammo}, ...}}
+
+// Input queue for deterministic lockstep
+let inputQueue = []; // [{tick, playerId, input, timestamp}, ...]
+let lastProcessedTick = -1;
+let inputBufferSize = 3; // Process inputs 3 ticks ahead for lag compensation
 
 // Firebase configuration
 const firebaseConfig = {
@@ -1172,10 +1236,7 @@ function updatePlayer() {
         }
     });
 
-    // Shooting (only if autopilot is off, or if autopilot triggered it)
-    // For non-host players in multiplayer, shooting is handled by host
-    // Host processes input and creates bullets, so non-host players don't create bullets locally
-    if (!multiplayerMode || !networkManager || networkManager.isHostPlayer()) {
+    // Shooting (deterministic lockstep - both players process their own shooting)
     // Mouse button or spacebar for primary weapon
     if ((keys[' '] || mouseButtonDown) && weapons.primary.cooldown === 0) {
         shoot('primary');
@@ -1188,87 +1249,30 @@ function updatePlayer() {
     }
     if (keys['3'] && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
         shoot('cluster');
-        }
     }
     
-    // Send player input/position to network if in multiplayer mode
+    // Send player input for deterministic lockstep
     if (multiplayerMode && networkManager && networkManager.isConnected()) {
-        if (networkManager.isHostPlayer()) {
-            // Host sends full state (for other players to see)
-            const alliesWithPlayerId = allies.map(ally => ({
-                ...ally,
-                playerId: networkManager.getPlayerId()
-            }));
-            
-            const bulletsWithPlayerId = bullets.map(bullet => ({
-                ...bullet,
-                playerId: networkManager.getPlayerId()
-            }));
-            
-            let tractorBeamState = null;
-            if (tractorBeam.active && tractorBeam.target) {
-                tractorBeamState = {
-                    active: true,
-                    targetId: tractorBeam.target.id || null,
-                    targetType: tractorBeam.targetType,
-                    playerX: player.x,
-                    playerY: player.y,
-                    playerRotation: player.rotation
-                };
-            } else {
-                tractorBeamState = { active: false };
-            }
-            
-            networkManager.sendPlayerState({
-                x: player.x,
-                y: player.y,
-                rotation: player.rotation,
-                health: player.health,
-                maxHealth: player.maxHealth,
-                shields: player.shields,
-                maxShields: player.maxShields,
-                score: gameState.score,
-                cargoCrewAllocation: {
-                    engineering: cargoCrewAllocation.engineering.length,
-                    navigation: cargoCrewAllocation.navigation.length
-                },
-                allies: alliesWithPlayerId,
-                bullets: bulletsWithPlayerId,
-                tractorBeam: tractorBeamState
-            });
-        } else {
-            // Non-host players: Only send input/position
-            // All game logic is processed by host
-            let tractorBeamState = null;
-            if (tractorBeam.active && tractorBeam.target) {
-                tractorBeamState = {
-                    active: true,
-                    targetId: tractorBeam.target.id || null,
-                    targetType: tractorBeam.targetType
-                };
-            } else {
-                tractorBeamState = { active: false };
-            }
-            
-            networkManager.sendPlayerState({
-                x: player.x,
-                y: player.y,
-                rotation: player.rotation,
-                health: player.health,
-                shields: player.shields,
-                // Send input keys for host to process shooting/actions
-                keys: {
-                    space: keys[' '] || false,
-                    key1: keys['1'] || false,
-                    key2: keys['2'] || false,
-                    key3: keys['3'] || false,
-                    mouseButton: mouseButtonDown || false
-                },
-                mouseX: mouseActive ? mouseX : null,
-                mouseY: mouseActive ? mouseY : null,
-                tractorBeam: tractorBeamState
-            });
-        }
+        networkManager.sendInput({
+            tick: gameTick,
+            keys: {
+                space: keys[' '] || false,
+                key1: keys['1'] || false,
+                key2: keys['2'] || false,
+                key3: keys['3'] || false,
+                mouseButton: mouseButtonDown || false,
+                w: keys['w'] || false,
+                a: keys['a'] || false,
+                s: keys['s'] || false,
+                d: keys['d'] || false,
+                arrowUp: keys['ArrowUp'] || false,
+                arrowDown: keys['ArrowDown'] || false,
+                arrowLeft: keys['ArrowLeft'] || false,
+                arrowRight: keys['ArrowRight'] || false
+            },
+            mouseX: mouseActive ? mouseX : null,
+            mouseY: mouseActive ? mouseY : null
+        });
     }
     
     // Add smoke particles when damaged (in update, not draw)
@@ -8925,97 +8929,8 @@ function gameLoop(currentTime = performance.now()) {
                 }
             }
             
-            // In multiplayer, host sends complete game state to clients (host-authoritative)
-            if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
-                // Track if we need to force immediate sync (when entities are destroyed)
-                let forceSync = false;
-                
-                // Check if any entities were destroyed this frame by comparing counts
-                const currentEnemyCount = enemies.length;
-                const currentAsteroidCount = asteroids.length;
-                const currentBossCount = bosses.length;
-                
-                // Store previous counts (initialize if not exists)
-                if (typeof window.lastEntityCounts === 'undefined') {
-                    window.lastEntityCounts = {
-                        enemies: currentEnemyCount,
-                        asteroids: currentAsteroidCount,
-                        bosses: currentBossCount
-                    };
-                }
-                
-                // Force sync if any entity count decreased (entity was destroyed)
-                if (currentEnemyCount < window.lastEntityCounts.enemies ||
-                    currentAsteroidCount < window.lastEntityCounts.asteroids ||
-                    currentBossCount < window.lastEntityCounts.bosses) {
-                    forceSync = true;
-                }
-                
-                // Update stored counts
-                window.lastEntityCounts = {
-                    enemies: currentEnemyCount,
-                    asteroids: currentAsteroidCount,
-                    bosses: currentBossCount
-                };
-                
-                // Collect all player states (including remote players)
-                const allPlayerStates = {};
-                // Add host player
-                allPlayerStates[networkManager.getPlayerId()] = {
-                    x: player.x,
-                    y: player.y,
-                    rotation: player.rotation,
-                    health: player.health,
-                    shields: player.shields
-                };
-                // Add remote players
-                remotePlayers.forEach((remotePlayer, playerId) => {
-                    allPlayerStates[playerId] = {
-                        x: remotePlayer.x,
-                        y: remotePlayer.y,
-                        rotation: remotePlayer.rotation,
-                        health: remotePlayer.health,
-                        shields: remotePlayer.shields
-                    };
-                });
-                
-                // Send complete game state (host-authoritative approach)
-                // Limit particles to reduce payload size (keep only recent ones)
-                const limitedParticles = particles.slice(-50); // Max 50 particles
-                
-                const stateToSend = {
-                    enemies: enemies,
-                    asteroids: asteroids,
-                    bosses: bosses,
-                    bullets: bullets, // All bullets (player, enemy, ally)
-                    allies: allies,
-                    particles: limitedParticles, // Limited to reduce payload
-                    powerups: powerups,
-                    nebulas: nebulas,
-                    cargoVessel: gameState.gameMode === 'mission' ? cargoVessel : null,
-                    players: allPlayerStates, // All player positions/states
-                    score: gameState.score, // Shared score
-                    level: gameState.level,
-                    enemiesKilled: gameState.enemiesKilled,
-                    effects: pendingEffects // Effects for non-host to render (explosions, sounds)
-                };
-                
-                // Debug: log what we're sending (throttled to avoid spam)
-                if (!window.lastStateSendLog || Date.now() - window.lastStateSendLog > 1000) {
-                    console.log('[HOST] Sending state:', {
-                        enemies: enemies.length,
-                        asteroids: asteroids.length,
-                        bullets: bullets.length,
-                        effects: pendingEffects.length
-                    });
-                    window.lastStateSendLog = Date.now();
-                }
-                
-                networkManager.sendCompleteGameState(stateToSend, forceSync);
-                
-                // Clear pending effects after sending
-                pendingEffects = [];
-            }
+            // In deterministic lockstep, we don't send game state - only inputs are synced
+            // Both players run the same simulation, so state stays in sync automatically
         } else {
             // Still update UI when paused (for visual feedback)
             if (!HEADLESS_MODE || OBSERVER_MODE) {
@@ -9057,43 +8972,31 @@ function gameLoop(currentTime = performance.now()) {
 // Helper function to update game logic in one step
 function updateGameStep() {
     // ============================================================
-    // NON-HOST PATH: Pure renderer - NO game logic
-    // All game state comes from host via completeGameStateUpdated
+    // DETERMINISTIC LOCKSTEP: Both players run identical game loop
     // ============================================================
-    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
-        // Only update local player movement (client-side prediction for responsiveness)
-        // This captures input and moves the local player - position is reconciled with host
-        updatePlayer();
+    
+    // Process inputs from queue for this tick (deterministic lockstep)
+    // In lockstep, both players process all inputs in the same order
+    if (multiplayerMode && networkManager) {
+        const currentTick = gameTick;
+        const inputsForTick = inputQueue.filter(i => i.tick === currentTick);
         
-        // NO collision detection - host handles all collisions
-        // NO entity updates - all entity positions come from host
-        // NO bullet updates - all bullets come from host
-        // NO damage application - host sends playerDamaged events
+        // Sort inputs by playerId for deterministic order
+        inputsForTick.sort((a, b) => a.playerId.localeCompare(b.playerId));
         
-        // Only update visual effects (particles/fireworks are cosmetic)
-        updateParticles();
-        updateFireworks();
+        // Process all inputs for this tick (both local and remote)
+        // Note: Local player input is already captured in updatePlayer() via keys
+        // Remote player inputs are stored for potential future use
+        // For now, we still sync player positions separately for rendering
         
-        // Update UI
-        if (!HEADLESS_MODE || OBSERVER_MODE) {
-            updateUI();
-        }
-        
-        return; // Exit - non-host does NOT run any game logic
+        // Remove processed inputs (keep last 10 ticks for safety)
+        inputQueue = inputQueue.filter(i => i.tick > currentTick - 10);
     }
     
-    // Host runs full game loop
+    // Both players run full game loop (deterministic)
     updatePlayer();
     updateTractorBeam();
     updateBullets();
-    
-    // Host processes remote players' actions
-    if (multiplayerMode && networkManager && networkManager.isHostPlayer()) {
-        processRemotePlayerShooting(); // Process shooting input and create bullets on host
-        processRemotePlayerCollisions(); // Process collisions for remote players
-        processRemoteTractorBeams();
-    }
-    
     updateEnemies();
     updateBosses();
     updateAsteroids();
@@ -9103,6 +9006,9 @@ function updateGameStep() {
     updateParticles();
     updateEnemyBullets();
     updateFireworks();
+    
+    // Increment game tick
+    gameTick++;
     
     // Mission mode updates
     if (gameState.gameMode === 'mission') {
@@ -9485,10 +9391,37 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
     
-    // Listen for damage events from host (for non-host players)
+    // Listen for game seed (deterministic lockstep)
+    networkManager.on('gameSeedUpdated', (data) => {
+        if (data.seed && gameSeed === null) {
+            gameSeed = data.seed;
+            deterministicRNG = new DeterministicRNG(gameSeed);
+            console.log('[LOCKSTEP] Game seed received:', gameSeed);
+        }
+    });
+    
+    // Listen for inputs from other players (deterministic lockstep)
+    networkManager.on('inputReceived', (data) => {
+        if (data.input) {
+            // Add input to queue for processing at the correct tick
+            inputQueue.push({
+                tick: data.input.tick,
+                playerId: data.input.playerId,
+                keys: data.input.keys,
+                mouseX: data.input.mouseX,
+                mouseY: data.input.mouseY,
+                timestamp: data.input.timestamp
+            });
+            
+            // Sort queue by tick
+            inputQueue.sort((a, b) => a.tick - b.tick);
+        }
+    });
+    
+    // Listen for damage events (still needed for some edge cases)
     networkManager.on('playerDamaged', (data) => {
         console.log('[DAMAGE] Received damage event:', data);
-        if (!networkManager.isHostPlayer() && data.damage) {
+        if (data.damage) {
             takeDamage(data.damage);
         }
     });

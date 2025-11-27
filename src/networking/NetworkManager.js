@@ -64,11 +64,13 @@ export class NetworkManager {
         this.isHost = true;
         
         try {
-            // Create room structure
+            // Create room structure with deterministic seed
+            const gameSeed = Date.now(); // Shared seed for deterministic lockstep
             const roomRef = this.db.ref(`rooms/${this.roomId}`);
             await roomRef.set({
                 hostId: this.playerId,
                 createdAt: firebase.database.ServerValue.TIMESTAMP,
+                gameSeed: gameSeed, // Shared seed for deterministic RNG
                 gameState: {
                     score: 0,
                     level: 1,
@@ -197,11 +199,19 @@ export class NetworkManager {
                 }
             });
             
-            // Clients listen to host's complete game state (new host-authoritative approach)
-            roomRef.child('completeGameState').on('value', (snapshot) => {
-                const completeState = snapshot.val();
-                if (completeState) {
-                    this.notifyListeners('completeGameStateUpdated', { completeState });
+            // Listen for game seed (for deterministic lockstep)
+            roomRef.child('gameSeed').on('value', (snapshot) => {
+                const seed = snapshot.val();
+                if (seed) {
+                    this.notifyListeners('gameSeedUpdated', { seed });
+                }
+            });
+            
+            // Listen for inputs from other players (deterministic lockstep)
+            roomRef.child('inputs').on('child_added', (snapshot) => {
+                const input = snapshot.val();
+                if (input && input.playerId !== this.playerId) {
+                    this.notifyListeners('inputReceived', { input });
                 }
             });
         }
@@ -339,6 +349,35 @@ export class NetworkManager {
             });
         } catch (error) {
             console.error('Failed to send event:', error);
+        }
+    }
+    
+    /**
+     * Send player input for deterministic lockstep
+     */
+    async sendInput(input) {
+        if (!this.connected || !this.db || !this.roomId || !this.playerId) {
+            return;
+        }
+        
+        const now = Date.now();
+        if (now - this.lastInputSent < this.inputThrottle) {
+            return; // Throttle updates
+        }
+        this.lastInputSent = now;
+        
+        try {
+            const inputsRef = this.db.ref(`rooms/${this.roomId}/inputs`);
+            await inputsRef.push({
+                playerId: this.playerId,
+                tick: input.tick,
+                keys: input.keys,
+                mouseX: input.mouseX,
+                mouseY: input.mouseY,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+        } catch (error) {
+            console.error('Failed to send input:', error);
         }
     }
     
