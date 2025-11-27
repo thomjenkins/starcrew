@@ -5535,7 +5535,8 @@ function drawRemotePlayers() {
             );
             
             // Then try to draw the ship texture on top if available
-            if (textures.ship) {
+            // Check if texture exists and is valid
+            if (textures.ship && spriteRenderer.gl && spriteRenderer.gl.isTexture(textures.ship)) {
                 spriteRenderer.drawSprite(
                     remotePlayer.x, remotePlayer.y,
                     player.width, player.height,
