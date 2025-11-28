@@ -7685,7 +7685,11 @@ function playMission1Video() {
     
     // Create video element
     mission1VideoElement = document.createElement('video');
-    mission1VideoElement.src = 'mission1.mov';
+    // Use absolute path from root - works with Python HTTP server
+    const basePath = window.location.pathname.split('/').slice(0, -1).join('/') || '';
+    const videoPath = basePath ? `${basePath}/mission1.mov` : '/mission1.mov';
+    console.log('Loading video from:', videoPath);
+    mission1VideoElement.src = videoPath;
     mission1VideoElement.style.cssText = `
         max-width: 90%;
         max-height: 90%;
@@ -7707,10 +7711,26 @@ function playMission1Video() {
         startMission1();
     });
     
-    // Handle video errors
+    // Handle video errors - try alternative paths/formats
     mission1VideoElement.addEventListener('error', (e) => {
-        console.warn('Failed to load mission1.mov, starting mission anyway:', e);
-        startMission1();
+        console.warn('Failed to load video from:', videoPath, e);
+        // Try relative path as fallback
+        mission1VideoElement.src = 'mission1.mov';
+        mission1VideoElement.load();
+        
+        // If that also fails, try .mp4
+        mission1VideoElement.addEventListener('error', (e2) => {
+            console.warn('Failed to load mission1.mov, trying .mp4:', e2);
+            const mp4Path = videoPath.replace('.mov', '.mp4');
+            mission1VideoElement.src = mp4Path;
+            mission1VideoElement.load();
+            
+            // If .mp4 also fails, start mission anyway
+            mission1VideoElement.addEventListener('error', (e3) => {
+                console.warn('Failed to load video in any format, starting mission anyway:', e3);
+                startMission1();
+            }, { once: true });
+        }, { once: true });
     });
     
     // Wait for video to be ready before playing
