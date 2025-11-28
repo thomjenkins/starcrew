@@ -7685,11 +7685,8 @@ function playMission1Video() {
     
     // Create video element
     mission1VideoElement = document.createElement('video');
-    // Use absolute path from root - prefer MP4 for better browser support
-    const basePath = window.location.pathname.split('/').slice(0, -1).join('/') || '';
-    const videoPath = basePath ? `${basePath}/mission1.mp4` : '/mission1.mp4';
-    console.log('Loading video from:', videoPath);
-    mission1VideoElement.src = videoPath;
+    // Use simple relative path like other assets (background.png, ship.png, etc.)
+    mission1VideoElement.src = 'mission1.mp4';
     mission1VideoElement.style.cssText = `
         max-width: 90%;
         max-height: 90%;
@@ -7699,6 +7696,7 @@ function playMission1Video() {
     mission1VideoElement.autoplay = true;
     mission1VideoElement.playsInline = true; // Important for mobile
     mission1VideoElement.muted = false;
+    mission1VideoElement.preload = 'auto';
     
     // Prevent video from being skipped
     mission1VideoElement.addEventListener('click', (e) => {
@@ -7706,41 +7704,60 @@ function playMission1Video() {
         e.stopPropagation();
     });
     
+    // Debug: Log all video events
+    mission1VideoElement.addEventListener('loadstart', () => console.log('[VIDEO] Load started'));
+    mission1VideoElement.addEventListener('loadedmetadata', () => console.log('[VIDEO] Metadata loaded'));
+    mission1VideoElement.addEventListener('loadeddata', () => console.log('[VIDEO] Data loaded'));
+    mission1VideoElement.addEventListener('canplay', () => console.log('[VIDEO] Can play'));
+    mission1VideoElement.addEventListener('canplaythrough', () => console.log('[VIDEO] Can play through'));
+    mission1VideoElement.addEventListener('playing', () => console.log('[VIDEO] Playing'));
+    mission1VideoElement.addEventListener('pause', () => console.log('[VIDEO] Paused'));
+    
     // When video ends, start mission
     mission1VideoElement.addEventListener('ended', () => {
+        console.log('[VIDEO] Ended');
         startMission1();
     });
     
-    // Handle video errors - try alternative paths/formats
+    // Handle video errors - try alternative formats
     mission1VideoElement.addEventListener('error', (e) => {
-        console.warn('Failed to load video from:', videoPath, e);
-        // Try relative path as fallback
-        mission1VideoElement.src = 'mission1.mp4';
+        const error = mission1VideoElement.error;
+        console.error('[VIDEO] Error loading mission1.mp4:', {
+            code: error?.code,
+            message: error?.message,
+            networkState: mission1VideoElement.networkState,
+            readyState: mission1VideoElement.readyState,
+            src: mission1VideoElement.src
+        });
+        
+        // Try .mov as fallback
+        console.log('[VIDEO] Trying .mov format as fallback');
+        mission1VideoElement.src = 'mission1.mov';
         mission1VideoElement.load();
         
-        // If that also fails, try .mov as last resort
+        // If .mov also fails, start mission anyway
         mission1VideoElement.addEventListener('error', (e2) => {
-            console.warn('Failed to load mission1.mp4, trying .mov:', e2);
-            const movPath = videoPath.replace('.mp4', '.mov');
-            mission1VideoElement.src = movPath;
-            mission1VideoElement.load();
-            
-            // If .mov also fails, start mission anyway
-            mission1VideoElement.addEventListener('error', (e3) => {
-                console.warn('Failed to load video in any format, starting mission anyway:', e3);
-                startMission1();
-            }, { once: true });
+            const error2 = mission1VideoElement.error;
+            console.error('[VIDEO] Error loading mission1.mov:', {
+                code: error2?.code,
+                message: error2?.message
+            });
+            console.warn('[VIDEO] Failed to load video in any format, starting mission anyway');
+            startMission1();
         }, { once: true });
     });
     
     // Wait for video to be ready before playing
-    mission1VideoElement.addEventListener('loadeddata', () => {
-        mission1VideoElement.play().catch(err => {
-            console.warn('Failed to play video:', err);
+    mission1VideoElement.addEventListener('canplaythrough', () => {
+        console.log('[VIDEO] Can play through, attempting to play');
+        mission1VideoElement.play().then(() => {
+            console.log('[VIDEO] Playback started successfully');
+        }).catch(err => {
+            console.warn('[VIDEO] Failed to play video:', err);
             // Try again after a short delay
             setTimeout(() => {
                 mission1VideoElement.play().catch(err2 => {
-                    console.warn('Failed to play video on retry:', err2);
+                    console.warn('[VIDEO] Failed to play video on retry:', err2);
                     startMission1();
                 });
             }, 500);
@@ -7751,6 +7768,7 @@ function playMission1Video() {
     document.body.appendChild(mission1VideoOverlay);
     
     // Load the video
+    console.log('[VIDEO] Loading video from:', mission1VideoElement.src);
     mission1VideoElement.load();
 }
 
