@@ -2624,10 +2624,11 @@ function updateEnemies() {
             createExplosion(enemy.x, enemy.y, 30);
             gameState.score += 50;
             gameState.enemiesKilled++;
-            
+
             // Track mission 1 kills
             if (gameState.mission1Active) {
                 gameState.mission1Kills++;
+                updateMission1UI();
                 if (gameState.mission1Kills >= 5) {
                     completeMission1();
                 }
@@ -2653,10 +2654,11 @@ function updateEnemies() {
                 createExplosion(enemy.x, enemy.y, 30);
                 gameState.score += 50;
                 gameState.enemiesKilled++;
-                
+
                 // Track mission 1 kills
                 if (gameState.mission1Active) {
                     gameState.mission1Kills++;
+                    updateMission1UI();
                     if (gameState.mission1Kills >= 5) {
                         completeMission1();
                     }
@@ -2686,10 +2688,11 @@ function updateEnemies() {
             createExplosion(enemy.x, enemy.y, 30);
             gameState.score += 50;
             gameState.enemiesKilled++;
-            
+
             // Track mission 1 kills
             if (gameState.mission1Active) {
                 gameState.mission1Kills++;
+                updateMission1UI();
                 if (gameState.mission1Kills >= 5) {
                     completeMission1();
                 }
@@ -2703,10 +2706,11 @@ function updateEnemies() {
             createExplosion(enemy.x, enemy.y, 30);
             gameState.score += 50;
             gameState.enemiesKilled++;
-            
+
             // Track mission 1 kills
             if (gameState.mission1Active) {
                 gameState.mission1Kills++;
+                updateMission1UI();
                 if (gameState.mission1Kills >= 5) {
                     completeMission1();
                 }
@@ -7645,6 +7649,11 @@ function drawCargoVessel() {
 // Mission 1: Alien Transmission and Enemy Elimination
 let mission1VideoElement = null;
 let mission1VideoOverlay = null;
+let mission1VideoSafetyTimeout = null;
+let mission1VideoFinalTimeout = null;
+let mission1VideoPrompt = null;
+let mission1VideoPromptMessage = null;
+let mission1VideoPlayButton = null;
 
 function checkMission1Trigger() {
     // Check if score reached 350 and video hasn't been shown
@@ -7657,6 +7666,31 @@ function checkMission1Trigger() {
 function playMission1Video() {
     // Pause the game
     gameState.paused = true;
+
+    // Safety: if the video fails to start or fire events, begin the mission anyway
+    if (mission1VideoSafetyTimeout) {
+        clearTimeout(mission1VideoSafetyTimeout);
+    }
+    if (mission1VideoFinalTimeout) {
+        clearTimeout(mission1VideoFinalTimeout);
+    }
+    mission1VideoSafetyTimeout = setTimeout(() => {
+        console.warn('[VIDEO] Mission 1 video not playing yet; prompting user interaction');
+        if (mission1VideoPromptMessage && mission1VideoPlayButton) {
+            mission1VideoPromptMessage.textContent = 'Tap Play to start the transmission.';
+            mission1VideoPlayButton.style.display = 'block';
+        }
+        mission1VideoElement?.play().catch(err => {
+            console.warn('[VIDEO] Safety playback attempt failed:', err);
+        });
+    }, 7000);
+
+    mission1VideoFinalTimeout = setTimeout(() => {
+        if (!gameState.mission1Active && !gameState.mission1Completed) {
+            console.warn('[VIDEO] Starting mission without video after manual prompt timeout');
+            startMission1();
+        }
+    }, 15000);
     
     // Create video overlay (non-clickable, non-skippable)
     mission1VideoOverlay = document.createElement('div');
@@ -7673,7 +7707,60 @@ function playMission1Video() {
         align-items: center;
         pointer-events: auto;
     `;
-    
+
+    mission1VideoPrompt = document.createElement('div');
+    mission1VideoPrompt.style.cssText = `
+        position: absolute;
+        bottom: 40px;
+        left: 0;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        color: #fff;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+        font-size: 18px;
+        pointer-events: none;
+    `;
+
+    mission1VideoPromptMessage = document.createElement('div');
+    mission1VideoPromptMessage.textContent = 'Preparing transmission...';
+
+    mission1VideoPlayButton = document.createElement('button');
+    mission1VideoPlayButton.textContent = 'Tap to play';
+    mission1VideoPlayButton.style.cssText = `
+        padding: 10px 18px;
+        background: #2f7df6;
+        border: none;
+        border-radius: 6px;
+        color: white;
+        font-size: 16px;
+        cursor: pointer;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        pointer-events: auto;
+        display: none;
+    `;
+    mission1VideoPlayButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!mission1VideoElement) return;
+        mission1VideoElement.pause();
+        mission1VideoElement.currentTime = 0;
+        mission1VideoElement.play().then(() => {
+            console.log('[VIDEO] Playback started after user interaction');
+            mission1VideoPromptMessage.textContent = 'Transmission in progress...';
+            mission1VideoPlayButton.style.display = 'none';
+        }).catch(err => {
+            console.warn('[VIDEO] User-initiated playback failed:', err);
+            mission1VideoPromptMessage.textContent = 'Tap Play again to start the transmission.';
+            mission1VideoPlayButton.style.display = 'block';
+        });
+    });
+
+    mission1VideoPrompt.appendChild(mission1VideoPromptMessage);
+    mission1VideoPrompt.appendChild(mission1VideoPlayButton);
+
     // Prevent clicks from closing video
     mission1VideoOverlay.addEventListener('click', (e) => {
         e.preventDefault();
@@ -7710,7 +7797,19 @@ function playMission1Video() {
     mission1VideoElement.addEventListener('loadeddata', () => console.log('[VIDEO] Data loaded'));
     mission1VideoElement.addEventListener('canplay', () => console.log('[VIDEO] Can play'));
     mission1VideoElement.addEventListener('canplaythrough', () => console.log('[VIDEO] Can play through'));
-    mission1VideoElement.addEventListener('playing', () => console.log('[VIDEO] Playing'));
+    mission1VideoElement.addEventListener('playing', () => {
+        console.log('[VIDEO] Playing');
+        if (mission1VideoSafetyTimeout) {
+            clearTimeout(mission1VideoSafetyTimeout);
+            mission1VideoSafetyTimeout = null;
+        }
+        if (mission1VideoFinalTimeout) {
+            clearTimeout(mission1VideoFinalTimeout);
+            mission1VideoFinalTimeout = null;
+        }
+        mission1VideoPromptMessage.textContent = 'Transmission in progress...';
+        mission1VideoPlayButton.style.display = 'none';
+    });
     mission1VideoElement.addEventListener('pause', () => console.log('[VIDEO] Paused'));
     
     // When video ends, start mission
@@ -7750,34 +7849,56 @@ function playMission1Video() {
     // Wait for video to be ready before playing
     mission1VideoElement.addEventListener('canplaythrough', () => {
         console.log('[VIDEO] Can play through, attempting to play');
+        mission1VideoPlayButton.style.display = 'none';
         mission1VideoElement.play().then(() => {
             console.log('[VIDEO] Playback started successfully');
+            mission1VideoPromptMessage.textContent = 'Transmission in progress...';
         }).catch(err => {
             console.warn('[VIDEO] Failed to play video:', err);
+            mission1VideoPromptMessage.textContent = 'Autoplay blocked. Tap to start the transmission.';
+            mission1VideoPlayButton.style.display = 'block';
             // Try again after a short delay
             setTimeout(() => {
                 mission1VideoElement.play().catch(err2 => {
                     console.warn('[VIDEO] Failed to play video on retry:', err2);
-                    startMission1();
+                    mission1VideoPromptMessage.textContent = 'Tap Play to begin Mission 1.';
+                    mission1VideoPlayButton.style.display = 'block';
                 });
             }, 500);
         });
     });
-    
+
     mission1VideoOverlay.appendChild(mission1VideoElement);
+    mission1VideoOverlay.appendChild(mission1VideoPrompt);
     document.body.appendChild(mission1VideoOverlay);
-    
+
     // Load the video
     console.log('[VIDEO] Loading video from:', mission1VideoElement.src);
     mission1VideoElement.load();
 }
 
 function startMission1() {
+    if (gameState.mission1Active || gameState.mission1Completed) {
+        return;
+    }
+    if (mission1VideoSafetyTimeout) {
+        clearTimeout(mission1VideoSafetyTimeout);
+        mission1VideoSafetyTimeout = null;
+    }
+
+    if (mission1VideoFinalTimeout) {
+        clearTimeout(mission1VideoFinalTimeout);
+        mission1VideoFinalTimeout = null;
+    }
+
     // Remove video overlay
     if (mission1VideoOverlay) {
         mission1VideoOverlay.remove();
         mission1VideoOverlay = null;
     }
+    mission1VideoPrompt = null;
+    mission1VideoPromptMessage = null;
+    mission1VideoPlayButton = null;
     mission1VideoElement = null;
     
     // Initialize mission state
