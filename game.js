@@ -2624,10 +2624,11 @@ function updateEnemies() {
             createExplosion(enemy.x, enemy.y, 30);
             gameState.score += 50;
             gameState.enemiesKilled++;
-            
+
             // Track mission 1 kills
             if (gameState.mission1Active) {
                 gameState.mission1Kills++;
+                updateMission1UI();
                 if (gameState.mission1Kills >= 5) {
                     completeMission1();
                 }
@@ -2653,10 +2654,11 @@ function updateEnemies() {
                 createExplosion(enemy.x, enemy.y, 30);
                 gameState.score += 50;
                 gameState.enemiesKilled++;
-                
+
                 // Track mission 1 kills
                 if (gameState.mission1Active) {
                     gameState.mission1Kills++;
+                    updateMission1UI();
                     if (gameState.mission1Kills >= 5) {
                         completeMission1();
                     }
@@ -2686,10 +2688,11 @@ function updateEnemies() {
             createExplosion(enemy.x, enemy.y, 30);
             gameState.score += 50;
             gameState.enemiesKilled++;
-            
+
             // Track mission 1 kills
             if (gameState.mission1Active) {
                 gameState.mission1Kills++;
+                updateMission1UI();
                 if (gameState.mission1Kills >= 5) {
                     completeMission1();
                 }
@@ -2703,10 +2706,11 @@ function updateEnemies() {
             createExplosion(enemy.x, enemy.y, 30);
             gameState.score += 50;
             gameState.enemiesKilled++;
-            
+
             // Track mission 1 kills
             if (gameState.mission1Active) {
                 gameState.mission1Kills++;
+                updateMission1UI();
                 if (gameState.mission1Kills >= 5) {
                     completeMission1();
                 }
@@ -7645,6 +7649,7 @@ function drawCargoVessel() {
 // Mission 1: Alien Transmission and Enemy Elimination
 let mission1VideoElement = null;
 let mission1VideoOverlay = null;
+let mission1VideoSafetyTimeout = null;
 
 function checkMission1Trigger() {
     // Check if score reached 350 and video hasn't been shown
@@ -7657,6 +7662,15 @@ function checkMission1Trigger() {
 function playMission1Video() {
     // Pause the game
     gameState.paused = true;
+
+    // Safety: if the video fails to start or fire events, begin the mission anyway
+    if (mission1VideoSafetyTimeout) {
+        clearTimeout(mission1VideoSafetyTimeout);
+    }
+    mission1VideoSafetyTimeout = setTimeout(() => {
+        console.warn('[VIDEO] Mission 1 video timed out, starting mission directly');
+        startMission1();
+    }, 7000);
     
     // Create video overlay (non-clickable, non-skippable)
     mission1VideoOverlay = document.createElement('div');
@@ -7756,11 +7770,11 @@ function playMission1Video() {
             console.warn('[VIDEO] Failed to play video:', err);
             // Try again after a short delay
             setTimeout(() => {
-                mission1VideoElement.play().catch(err2 => {
-                    console.warn('[VIDEO] Failed to play video on retry:', err2);
-                    startMission1();
-                });
-            }, 500);
+            mission1VideoElement.play().catch(err2 => {
+                console.warn('[VIDEO] Failed to play video on retry:', err2);
+                startMission1();
+            });
+        }, 500);
         });
     });
     
@@ -7773,6 +7787,11 @@ function playMission1Video() {
 }
 
 function startMission1() {
+    if (mission1VideoSafetyTimeout) {
+        clearTimeout(mission1VideoSafetyTimeout);
+        mission1VideoSafetyTimeout = null;
+    }
+
     // Remove video overlay
     if (mission1VideoOverlay) {
         mission1VideoOverlay.remove();
