@@ -7658,7 +7658,7 @@ function playMission1Video() {
     // Pause the game
     gameState.paused = true;
     
-    // Create video overlay
+    // Create video overlay (non-clickable, non-skippable)
     mission1VideoOverlay = document.createElement('div');
     mission1VideoOverlay.style.cssText = `
         position: fixed;
@@ -7671,7 +7671,17 @@ function playMission1Video() {
         display: flex;
         justify-content: center;
         align-items: center;
+        pointer-events: auto;
     `;
+    
+    // Prevent clicks from closing video
+    mission1VideoOverlay.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    });
+    mission1VideoOverlay.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+    });
     
     // Create video element
     mission1VideoElement = document.createElement('video');
@@ -7679,9 +7689,18 @@ function playMission1Video() {
     mission1VideoElement.style.cssText = `
         max-width: 90%;
         max-height: 90%;
+        pointer-events: none;
     `;
     mission1VideoElement.controls = false;
     mission1VideoElement.autoplay = true;
+    mission1VideoElement.playsInline = true; // Important for mobile
+    mission1VideoElement.muted = false;
+    
+    // Prevent video from being skipped
+    mission1VideoElement.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    });
     
     // When video ends, start mission
     mission1VideoElement.addEventListener('ended', () => {
@@ -7694,14 +7713,25 @@ function playMission1Video() {
         startMission1();
     });
     
+    // Wait for video to be ready before playing
+    mission1VideoElement.addEventListener('loadeddata', () => {
+        mission1VideoElement.play().catch(err => {
+            console.warn('Failed to play video:', err);
+            // Try again after a short delay
+            setTimeout(() => {
+                mission1VideoElement.play().catch(err2 => {
+                    console.warn('Failed to play video on retry:', err2);
+                    startMission1();
+                });
+            }, 500);
+        });
+    });
+    
     mission1VideoOverlay.appendChild(mission1VideoElement);
     document.body.appendChild(mission1VideoOverlay);
     
-    // Play video
-    mission1VideoElement.play().catch(err => {
-        console.warn('Failed to play video:', err);
-        startMission1();
-    });
+    // Load the video
+    mission1VideoElement.load();
 }
 
 function startMission1() {
@@ -7728,6 +7758,9 @@ function startMission1() {
 }
 
 function spawnMission1Enemies() {
+    // Clear all existing enemies first
+    enemies = [];
+    
     // Get cargo ship position (use center of canvas if cargo ship doesn't exist)
     let centerX, centerY;
     if (cargoVessel) {
@@ -7741,6 +7774,7 @@ function spawnMission1Enemies() {
     const spawnRadius = 200; // Distance from cargo ship
     const angleStep = (Math.PI * 2) / 7; // 7 enemies evenly spaced
     
+    // Spawn exactly 7 enemies
     for (let i = 0; i < 7; i++) {
         const angle = i * angleStep;
         const x = centerX + Math.cos(angle) * spawnRadius;
