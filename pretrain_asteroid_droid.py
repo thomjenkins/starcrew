@@ -215,14 +215,17 @@ def generate_synthetic_observation():
     
     return obs
 
-def pretrain_agent(num_samples=50000, epochs=200, batch_size=128, output_file='pretrained_model.json'):
+def pretrain_agent(num_samples=200000, epochs=1000, batch_size=256, output_file='pretrained_model.json'):
     """Pre-train agent using heuristic policy with extensive training."""
     print(f"Pre-training agent with {num_samples} samples over {epochs} epochs...")
     print("This will create a model that starts with decent performance.")
+    print("⚠️  This will take significantly longer - be patient!")
     
     # Create model
     model = PolicyNetwork(OBS_DIM, NUM_ACTIONS)
+    # Use learning rate scheduling for better convergence
     optimizer = optim.Adam(model.parameters(), lr=0.001)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=50, verbose=True)
     criterion = nn.CrossEntropyLoss()
     
     # Generate training data
@@ -243,9 +246,10 @@ def pretrain_agent(num_samples=50000, epochs=200, batch_size=128, output_file='p
     obs_tensor = torch.FloatTensor(np.array(observations))
     action_tensor = torch.LongTensor(np.array(actions))
     
-    # Training loop
+    # Training loop with learning rate scheduling
     print("Training...")
     best_loss = float('inf')
+    patience_counter = 0
     for epoch in range(epochs):
         model.train()
         total_loss = 0
@@ -265,9 +269,10 @@ def pretrain_agent(num_samples=50000, epochs=200, batch_size=128, output_file='p
             policy_logits, _ = model(batch_obs)
             loss = criterion(policy_logits, batch_actions)
             
-            # Backward pass
+            # Backward pass with gradient clipping
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Gradient clipping
             optimizer.step()
             
             total_loss += loss.item()
@@ -276,9 +281,22 @@ def pretrain_agent(num_samples=50000, epochs=200, batch_size=128, output_file='p
         avg_loss = total_loss / num_batches
         if avg_loss < best_loss:
             best_loss = avg_loss
+            patience_counter = 0
+        else:
+            patience_counter += 1
         
-        if (epoch + 1) % 10 == 0:
-            print(f"  Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f} (best: {best_loss:.4f})")
+        # Update learning rate scheduler
+        scheduler.step(avg_loss)
+        current_lr = optimizer.param_groups[0]['lr']
+        
+        # Print progress more frequently for long training
+        if (epoch + 1) % 50 == 0 or epoch == 0:
+            print(f"  Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f} (best: {best_loss:.4f}), LR: {current_lr:.6f}")
+        
+        # Early stopping if loss hasn't improved for a while
+        if patience_counter >= 200 and epoch > 500:
+            print(f"  Early stopping at epoch {epoch + 1} (no improvement for 200 epochs)")
+            break
     
     # Export weights in JavaScript-compatible format
     print("Exporting weights for JavaScript...")
@@ -398,8 +416,9 @@ def pretrain_agent(num_samples=50000, epochs=200, batch_size=128, output_file='p
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Pre-train Asteroid Droid agent offline')
-    parser.add_argument('--samples', type=int, default=20000, help='Number of training samples (default: 20000)')
-    parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs (default: 100)')
+    parser.add_argument('--samples', type=int, default=200000, help='Number of training samples (default: 200000)')
+    parser.add_argument('--epochs', type=int, default=1000, help='Number of training epochs (default: 1000)')
+    parser.add_argument('--batch_size', type=int, default=256, help='Batch size (default: 256)')
     parser.add_argument('--output', type=str, default='pretrained_model.json', help='Output file (default: pretrained_model.json)')
     args = parser.parse_args()
     
