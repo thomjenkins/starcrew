@@ -4679,6 +4679,9 @@ async function loadRLAgent() {
         const pretrainedModel = await loadPretrainedModel();
         if (pretrainedModel) {
             console.log(`Pre-trained model found! Weights: ${pretrainedModel.weights.length} layers`);
+            if (pretrainedModel.training_epochs) {
+                console.log(`   Model trained for ${pretrainedModel.training_epochs} epochs`);
+            }
             rlAgent = new PPOAgent(OBS_DIM, NUM_ACTIONS);
             await rlAgent.loadModel(pretrainedModel);
             console.log('✅ Agent starting with pre-trained base knowledge');
