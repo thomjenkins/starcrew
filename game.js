@@ -2410,6 +2410,8 @@ function drawNebulas() {
 function updateEnemies() {
     // In deterministic lockstep, both players update positions and check collisions
     // Both players run the same deterministic simulation, so positions stay in sync
+    // Track which enemies have been counted for mission kills (prevent double counting)
+    const missionKillsTracked = new Set();
     
     enemies = enemies.filter(enemy => {
         // Decrease target switch cooldown
@@ -2625,8 +2627,9 @@ function updateEnemies() {
             gameState.score += 50;
             gameState.enemiesKilled++;
             
-            // Track mission 1 kills
-            if (gameState.mission1Active) {
+            // Track mission 1 kills (only once per enemy)
+            if (gameState.mission1Active && !missionKillsTracked.has(enemy.id)) {
+                missionKillsTracked.add(enemy.id);
                 gameState.mission1Kills++;
                 if (gameState.mission1Kills >= 5) {
                     completeMission1();
@@ -2654,8 +2657,9 @@ function updateEnemies() {
                 gameState.score += 50;
                 gameState.enemiesKilled++;
                 
-                // Track mission 1 kills
-                if (gameState.mission1Active) {
+                // Track mission 1 kills (only once per enemy)
+                if (gameState.mission1Active && !missionKillsTracked.has(enemy.id)) {
+                    missionKillsTracked.add(enemy.id);
                     gameState.mission1Kills++;
                     if (gameState.mission1Kills >= 5) {
                         completeMission1();
@@ -2687,8 +2691,9 @@ function updateEnemies() {
             gameState.score += 50;
             gameState.enemiesKilled++;
             
-            // Track mission 1 kills
-            if (gameState.mission1Active) {
+            // Track mission 1 kills (only once per enemy)
+            if (gameState.mission1Active && !missionKillsTracked.has(enemy.id)) {
+                missionKillsTracked.add(enemy.id);
                 gameState.mission1Kills++;
                 if (gameState.mission1Kills >= 5) {
                     completeMission1();
@@ -2704,8 +2709,9 @@ function updateEnemies() {
             gameState.score += 50;
             gameState.enemiesKilled++;
             
-            // Track mission 1 kills
-            if (gameState.mission1Active) {
+            // Track mission 1 kills (only once per enemy)
+            if (gameState.mission1Active && !missionKillsTracked.has(enemy.id)) {
+                missionKillsTracked.add(enemy.id);
                 gameState.mission1Kills++;
                 if (gameState.mission1Kills >= 5) {
                     completeMission1();
@@ -7693,7 +7699,6 @@ function playMission1Video() {
         pointer-events: none;
     `;
     mission1VideoElement.controls = false;
-    mission1VideoElement.autoplay = true;
     mission1VideoElement.playsInline = true; // Important for mobile
     mission1VideoElement.muted = false;
     mission1VideoElement.preload = 'auto';
@@ -7704,25 +7709,22 @@ function playMission1Video() {
         e.stopPropagation();
     });
     
-    // Debug: Log all video events
-    mission1VideoElement.addEventListener('loadstart', () => console.log('[VIDEO] Load started'));
-    mission1VideoElement.addEventListener('loadedmetadata', () => console.log('[VIDEO] Metadata loaded'));
-    mission1VideoElement.addEventListener('loadeddata', () => console.log('[VIDEO] Data loaded'));
-    mission1VideoElement.addEventListener('canplay', () => console.log('[VIDEO] Can play'));
-    mission1VideoElement.addEventListener('canplaythrough', () => console.log('[VIDEO] Can play through'));
-    mission1VideoElement.addEventListener('playing', () => console.log('[VIDEO] Playing'));
-    mission1VideoElement.addEventListener('pause', () => console.log('[VIDEO] Paused'));
+    let videoPlayed = false;
+    let errorHandled = false;
     
     // When video ends, start mission
     mission1VideoElement.addEventListener('ended', () => {
         console.log('[VIDEO] Ended');
+        if (!videoPlayed) return; // Prevent multiple calls
+        videoPlayed = true;
         startMission1();
     });
     
     // Handle video errors - try alternative formats
-    mission1VideoElement.addEventListener('error', (e) => {
+    const handleError = (attempt = 1) => {
+        if (errorHandled) return;
         const error = mission1VideoElement.error;
-        console.error('[VIDEO] Error loading mission1.mp4:', {
+        console.error(`[VIDEO] Error loading video (attempt ${attempt}):`, {
             code: error?.code,
             message: error?.message,
             networkState: mission1VideoElement.networkState,
@@ -7730,39 +7732,56 @@ function playMission1Video() {
             src: mission1VideoElement.src
         });
         
-        // Try .mov as fallback
-        console.log('[VIDEO] Trying .mov format as fallback');
-        mission1VideoElement.src = 'mission1.mov';
-        mission1VideoElement.load();
-        
-        // If .mov also fails, start mission anyway
-        mission1VideoElement.addEventListener('error', (e2) => {
-            const error2 = mission1VideoElement.error;
-            console.error('[VIDEO] Error loading mission1.mov:', {
-                code: error2?.code,
-                message: error2?.message
-            });
+        if (attempt === 1) {
+            // Try .mov as fallback
+            console.log('[VIDEO] Trying .mov format as fallback');
+            errorHandled = true;
+            mission1VideoElement.src = 'mission1.mov';
+            mission1VideoElement.load();
+            mission1VideoElement.addEventListener('error', () => handleError(2), { once: true });
+        } else {
+            // Both formats failed, start mission anyway
             console.warn('[VIDEO] Failed to load video in any format, starting mission anyway');
+            errorHandled = true;
             startMission1();
-        }, { once: true });
-    });
+        }
+    };
+    
+    mission1VideoElement.addEventListener('error', () => handleError(1), { once: true });
     
     // Wait for video to be ready before playing
-    mission1VideoElement.addEventListener('canplaythrough', () => {
-        console.log('[VIDEO] Can play through, attempting to play');
+    const tryPlay = () => {
+        console.log('[VIDEO] Attempting to play video');
         mission1VideoElement.play().then(() => {
             console.log('[VIDEO] Playback started successfully');
+            videoPlayed = true;
         }).catch(err => {
             console.warn('[VIDEO] Failed to play video:', err);
             // Try again after a short delay
             setTimeout(() => {
-                mission1VideoElement.play().catch(err2 => {
+                mission1VideoElement.play().then(() => {
+                    console.log('[VIDEO] Playback started on retry');
+                    videoPlayed = true;
+                }).catch(err2 => {
                     console.warn('[VIDEO] Failed to play video on retry:', err2);
-                    startMission1();
+                    // If autoplay fails, start mission anyway
+                    if (!videoPlayed) {
+                        startMission1();
+                    }
                 });
             }, 500);
         });
-    });
+    };
+    
+    // Try to play when video can play through
+    mission1VideoElement.addEventListener('canplaythrough', tryPlay, { once: true });
+    
+    // Also try when data is loaded (fallback)
+    mission1VideoElement.addEventListener('loadeddata', () => {
+        if (mission1VideoElement.readyState >= 3) {
+            tryPlay();
+        }
+    }, { once: true });
     
     mission1VideoOverlay.appendChild(mission1VideoElement);
     document.body.appendChild(mission1VideoOverlay);
@@ -7921,6 +7940,11 @@ function updateMission1UI() {
     const missionUI = document.getElementById('mission1UI');
     if (!missionUI || !gameState.mission1Active) return;
     
+    // Ensure startTime is set (fix NaN issue)
+    if (!gameState.mission1StartTime) {
+        gameState.mission1StartTime = Date.now();
+    }
+    
     const elapsed = Date.now() - gameState.mission1StartTime;
     const remaining = Math.max(0, gameState.mission1TimeLimit - elapsed);
     const minutes = Math.floor(remaining / 60000);
@@ -7928,7 +7952,7 @@ function updateMission1UI() {
     
     missionUI.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 5px;">MISSION: ELIMINATE ALIEN THREAT</div>
-        <div>Kills: ${gameState.mission1Kills}/5</div>
+        <div>Kills: ${gameState.mission1Kills || 0}/5</div>
         <div>Time: ${minutes}:${seconds.toString().padStart(2, '0')}</div>
     `;
 }
