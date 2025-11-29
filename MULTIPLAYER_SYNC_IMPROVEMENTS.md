@@ -124,3 +124,4 @@ function updateEnemies() {
 
 The host's sync will still overwrite positions, but local updates provide smooth animation between syncs.
 
+
