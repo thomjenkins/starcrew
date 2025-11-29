@@ -7874,27 +7874,37 @@ function playMission1Video() {
     
     mission1VideoElement.addEventListener('error', () => handleError(1), { once: true });
     
-    // Wait for video to be ready before playing
+    // Since user clicked to play, we can start playback immediately
+    // User interaction allows autoplay on mobile
     const tryPlay = () => {
-        console.log('[VIDEO] Attempting to play video');
+        console.log('[VIDEO] Attempting to play video (user-initiated)');
         mission1VideoElement.play().then(() => {
             console.log('[VIDEO] Playback started successfully');
             videoPlayed = true;
         }).catch(err => {
             console.warn('[VIDEO] Failed to play video:', err);
-            // Try again after a short delay
+            // Show error message but still allow manual play (controls are enabled)
+            const errorMsg = document.createElement('div');
+            errorMsg.style.cssText = `
+                position: absolute;
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(255, 0, 0, 0.8);
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+                font-family: 'Courier New', monospace;
+                z-index: 10001;
+            `;
+            errorMsg.textContent = 'Video failed to auto-play. Click play button.';
+            mission1VideoOverlay.appendChild(errorMsg);
+            // Remove error message after 5 seconds
             setTimeout(() => {
-                mission1VideoElement.play().then(() => {
-                    console.log('[VIDEO] Playback started on retry');
-                    videoPlayed = true;
-                }).catch(err2 => {
-                    console.warn('[VIDEO] Failed to play video on retry:', err2);
-                    // If autoplay fails, start mission anyway
-                    if (!videoPlayed) {
-                        startMission1();
-                    }
-                });
-            }, 500);
+                if (errorMsg.parentNode) {
+                    errorMsg.remove();
+                }
+            }, 5000);
         });
     };
     
