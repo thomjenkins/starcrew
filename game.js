@@ -318,7 +318,8 @@ let inputBufferSize = 3; // Process inputs 3 ticks ahead for lag compensation
 let pendingLocalInput = null; // Store local input before adding to queue
 let expectedPlayers = new Set(); // Track which players we expect inputs from
 let inputWaitTimeout = 0; // Timeout counter for waiting on inputs
-const MAX_INPUT_WAIT_TICKS = 5; // Max ticks to wait for inputs before proceeding
+const MAX_INPUT_WAIT_TICKS = 1; // Max ticks to wait for inputs before using prediction (reduced for performance)
+let lastKnownInput = null; // Store last known input for prediction
 
 // Firebase configuration
 const firebaseConfig = {
@@ -1439,6 +1440,9 @@ function updatePlayer(inputOverride = null) {
             inputQueue.push(localInput);
             inputQueue.sort((a, b) => a.tick - b.tick || a.playerId.localeCompare(b.playerId));
         }
+        
+        // Store for prediction
+        lastKnownInput = localInput;
         
         // Also send over network
         networkManager.sendInput({
@@ -7629,14 +7633,18 @@ function initMissionMode() {
 function updateCargoVessel() {
     if (!cargoVessel || gameState.gameMode !== 'mission') return;
     
-    // In multiplayer, only host updates cargo vessel
-    if (multiplayerMode && networkManager && !networkManager.isHostPlayer()) {
+    // In deterministic lockstep mode, both players simulate cargo vessel
+    // In non-lockstep multiplayer, only host updates it
+    if (multiplayerMode && networkManager && gameSeed === null && !networkManager.isHostPlayer()) {
         return;
     }
     
     // Apply navigation crew effect - reduces journey time proportionally
     // More crew = faster journey (reduced journey time, not increased speed)
-    const navigationCrewCount = cargoCrewAllocation.navigation.length;
+    // In multiplayer, use combined crew allocation from all players
+    const navigationCrewCount = multiplayerMode && networkManager 
+        ? getCombinedCargoCrewAllocation().navigation 
+        : cargoCrewAllocation.navigation.length;
     const journeyTimeReduction = navigationCrewCount * 0.1; // 10% time reduction per crew
     const effectiveJourneyTime = cargoVessel.maxJourneyTime * (1 - journeyTimeReduction);
     
@@ -7691,7 +7699,10 @@ function updateCargoVessel() {
     }
     
     // Apply cargo ship crew effects
-    const engineeringCrewCount = cargoCrewAllocation.engineering.length;
+    // In multiplayer, use combined crew allocation from all players
+    const engineeringCrewCount = multiplayerMode && networkManager 
+        ? getCombinedCargoCrewAllocation().engineering 
+        : cargoCrewAllocation.engineering.length;
     if (engineeringCrewCount > 0) {
         const healRate = engineeringCrewCount * 0.5; // 0.5 HP/sec per crew
         cargoVessel.health = Math.min(cargoVessel.maxHealth, cargoVessel.health + healRate * 0.1);
@@ -7699,18 +7710,18 @@ function updateCargoVessel() {
     
     // Add smoke particles when damaged (in update, not draw)
     const cargoHealthPercent = cargoVessel.health / cargoVessel.maxHealth;
-    if (cargoHealthPercent < 0.7 && Math.random() < 0.3) {
-        const smokeX = cargoVessel.x + (Math.random() - 0.5) * cargoVessel.width * 0.8;
-        const smokeY = cargoVessel.y + (Math.random() - 0.5) * cargoVessel.height * 0.8;
+    if (cargoHealthPercent < 0.7 && getRandom() < 0.3) {
+        const smokeX = cargoVessel.x + (getRandomRange(-0.5, 0.5)) * cargoVessel.width * 0.8;
+        const smokeY = cargoVessel.y + (getRandomRange(-0.5, 0.5)) * cargoVessel.height * 0.8;
         particles.push({
             x: smokeX,
             y: smokeY,
-            vx: (Math.random() - 0.5) * 0.5,
-            vy: (Math.random() - 0.5) * 0.5,
+            vx: getRandomRange(-0.5, 0.5) * 0.5,
+            vy: getRandomRange(-0.5, 0.5) * 0.5,
             life: 30,
             maxLife: 30,
-            size: 4 + Math.random() * 3,
-            color: `hsl(0, 0%, ${30 + Math.random() * 20}%)`, // Gray smoke
+            size: 4 + getRandomRange(0, 3),
+            color: `hsl(0, 0%, ${30 + getRandomRange(0, 20)}%)`, // Gray smoke
             glow: false
         });
     }
@@ -9814,24 +9825,22 @@ function updateGameStep() {
         localPlayerInput = inputsForTick.find(i => i.playerId === localPlayerId);
         remotePlayerInputs = inputsForTick.filter(i => i.playerId !== localPlayerId);
         
-        // If we don't have local input yet, wait a bit (but not forever)
+        // If we don't have local input yet, use prediction or empty input (don't wait)
         if (!localPlayerInput) {
-            inputWaitTimeout++;
-            if (inputWaitTimeout < MAX_INPUT_WAIT_TICKS) {
-                // Skip this tick, wait for input
-                // Check if input exists for future ticks (late input)
-                const futureInput = inputQueue.find(i => i.tick > currentTick && i.playerId === localPlayerId);
-                if (futureInput) {
-                    // Input arrived late - use it anyway to prevent desync
-                    localPlayerInput = futureInput;
-                    inputWaitTimeout = 0;
-                    console.log(`[LOCKSTEP] Using late input for tick ${currentTick} (arrived at tick ${futureInput.tick})`);
-                } else {
-                    return; // Still waiting for input
-                }
+            // Check if input exists for future ticks (late input)
+            const futureInput = inputQueue.find(i => i.tick > currentTick && i.playerId === localPlayerId);
+            if (futureInput) {
+                // Input arrived late - use it anyway to prevent desync
+                localPlayerInput = futureInput;
+                lastKnownInput = futureInput;
+            } else if (lastKnownInput && lastKnownInput.tick >= currentTick - 1) {
+                // Use last known input for prediction (only if very recent)
+                localPlayerInput = {
+                    ...lastKnownInput,
+                    tick: currentTick
+                };
             } else {
-                // Timeout: create empty input to prevent stalling
-                console.warn(`[LOCKSTEP] Timeout waiting for input at tick ${currentTick}, using empty input`);
+                // No input available - use empty input to keep game running
                 localPlayerInput = {
                     tick: currentTick,
                     playerId: localPlayerId,
@@ -9843,10 +9852,10 @@ function updateGameStep() {
                     mouseX: null,
                     mouseY: null
                 };
-                inputWaitTimeout = 0;
             }
         } else {
-            inputWaitTimeout = 0; // Reset timeout on successful input
+            // Store successful input for future prediction
+            lastKnownInput = localPlayerInput;
         }
         
         // Remove processed inputs (keep last 10 ticks for safety)
