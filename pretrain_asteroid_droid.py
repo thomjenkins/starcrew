@@ -422,6 +422,6 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=str, default='pretrained_model.json', help='Output file (default: pretrained_model.json)')
     args = parser.parse_args()
     
-    pretrain_agent(args.samples, args.epochs, output_file=args.output)
+    pretrain_agent(args.samples, args.epochs, batch_size=args.batch_size, output_file=args.output)
 
 
