@@ -8005,6 +8005,11 @@ function spawnMission1Enemies() {
 function updateMission1() {
     if (!gameState.mission1Active) return;
     
+    // Ensure startTime is set (fix NaN issue)
+    if (!gameState.mission1StartTime) {
+        gameState.mission1StartTime = Date.now();
+    }
+    
     const elapsed = Date.now() - gameState.mission1StartTime;
     
     // Check if time limit exceeded
@@ -8018,6 +8023,25 @@ function updateMission1() {
 
 function completeMission1() {
     if (!gameState.mission1Active || gameState.mission1Completed) return;
+    
+    // Update UI one final time to show 5/5 before deactivating
+    const missionUI = document.getElementById('mission1UI');
+    if (missionUI) {
+        // Ensure startTime is set for timer calculation
+        if (!gameState.mission1StartTime) {
+            gameState.mission1StartTime = Date.now();
+        }
+        const elapsed = Date.now() - gameState.mission1StartTime;
+        const remaining = Math.max(0, gameState.mission1TimeLimit - elapsed);
+        const minutes = Math.floor(remaining / 60000);
+        const seconds = Math.floor((remaining % 60000) / 1000);
+        
+        missionUI.innerHTML = `
+            <div style="font-weight: bold; margin-bottom: 5px;">MISSION: ELIMINATE ALIEN THREAT</div>
+            <div>Kills: ${gameState.mission1Kills}/5</div>
+            <div>Time: ${minutes}:${seconds.toString().padStart(2, '0')}</div>
+        `;
+    }
     
     gameState.mission1Active = false;
     gameState.mission1Completed = true;
