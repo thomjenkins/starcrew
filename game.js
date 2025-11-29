@@ -4452,6 +4452,11 @@ class PPOAgent {
             const source = savedData.pretrained ? 'pre-trained model' : 'saved model';
             console.log(`✅ Model weights loaded successfully from ${source} (${weights.length} layers)`);
             
+            // Log model metadata if available
+            if (savedData.pretrained && savedData.training_epochs) {
+                console.log(`   Pre-trained model info: ${savedData.training_epochs} epochs, loss ${savedData.best_loss?.toFixed(4) || 'unknown'}`);
+            }
+            
             // Test the loaded model with a sample observation to verify it's working
             if (savedData.pretrained) {
                 const testObs = new Array(this.obsDim).fill(0);
@@ -4691,8 +4696,11 @@ async function loadRLAgent() {
         }
         
         // 2. If pre-trained not found, try saved model from IndexedDB (user's learned model)
+        // NOTE: IndexedDB model takes precedence if it exists - this might override pretrained model
         const savedModel = await loadModelFromStorage();
         if (savedModel) {
+            console.warn('⚠️ Found saved model in IndexedDB - this will override pretrained model!');
+            console.warn('   To use pretrained model, clear IndexedDB or delete saved model');
             rlAgent = new PPOAgent(OBS_DIM, NUM_ACTIONS);
             await rlAgent.loadModel(savedModel);
             console.log(`PPO Agent loaded from saved model (episode ${savedModel.episode || 0})`);
