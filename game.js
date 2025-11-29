@@ -4373,8 +4373,18 @@ class PPOAgent {
             const avgPolicyLoss = await policyLoss.mean().data();
             totalPolicyLoss += avgPolicyLoss[0];
             
-            // Compute value loss
-            const valueLoss = tf.losses.meanSquaredError(returnTensor, tf.squeeze(values));
+            // Compute value loss with clipping (like PPO policy clipping)
+            const valueLoss1 = tf.losses.meanSquaredError(returnTensor, tf.squeeze(values));
+            const valuePredClipped = tf.add(
+                oldValueTensor,
+                tf.clipByValue(
+                    tf.sub(tf.squeeze(values), oldValueTensor),
+                    -this.epsClip,
+                    this.epsClip
+                )
+            );
+            const valueLoss2 = tf.losses.meanSquaredError(returnTensor, valuePredClipped);
+            const valueLoss = tf.maximum(valueLoss1, valueLoss2);
             const avgValueLoss = await valueLoss.data();
             totalValueLoss += avgValueLoss[0];
             
