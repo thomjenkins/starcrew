@@ -4336,6 +4336,8 @@ class PPOAgent {
         const advMean = advantages.reduce((a, b) => a + b, 0) / advantages.length;
         const advStd = Math.sqrt(advantages.reduce((sum, a) => sum + Math.pow(a - advMean, 2), 0) / advantages.length);
         const normalizedAdvantages = advantages.map(a => (a - advMean) / (advStd + 1e-8));
+        // Clip advantages to prevent extreme values from destabilizing training
+        const clippedAdvantages = normalizedAdvantages.map(a => Math.max(-10, Math.min(10, a)));
         
         // Convert to tensors
         const obsTensor = tf.tensor2d(this.buffer.observations);
