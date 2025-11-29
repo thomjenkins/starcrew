@@ -12,7 +12,7 @@ import json
 import os
 
 # Updated observation dimensions (matches game.js exactly)
-OBS_DIM = 59
+OBS_DIM = 63  # Fixed: was 59, game.js uses 63 (added powerups: 2 * 2 = 4 dimensions)
 NUM_ACTIONS = 20
 
 # Action constants (matches game.js ACTIONS)
@@ -212,6 +212,15 @@ def generate_synthetic_observation():
     
     # Upgrade menu (58)
     obs[58] = 1.0 if np.random.random() < 0.1 else 0.0
+    
+    # Powerups (59-62): 2 powerups * 2 values (dist, angle)
+    for i in range(2):
+        if np.random.random() < 0.3:
+            obs[59 + i*2] = np.random.random() * 0.6
+            obs[60 + i*2] = np.random.uniform(-1, 1)
+        else:
+            obs[59 + i*2] = 1.0
+            obs[60 + i*2] = 0.0
     
     return obs
 
@@ -508,7 +517,7 @@ def pretrain_agent(num_samples=200000, epochs=1000, batch_size=256, output_file=
     for _ in range(total):
         test_obs = generate_synthetic_observation()
         with torch.no_grad():
-            test_logits, _ = model(torch.FloatTensor([test_obs]))
+            test_logits, _ = model(torch.FloatTensor(np.array([test_obs])))
             predicted_action = torch.argmax(test_logits, dim=1).item()
             heuristic_action = get_heuristic_action(test_obs)
             if predicted_action == heuristic_action:
