@@ -3503,7 +3503,7 @@ let lastLogProb = null;
 let episodeStartScore = 0;
 let episodeStartTime = 0;
 let trainingUpdateCounter = 0;
-const TRAINING_UPDATE_FREQUENCY = 5;  // Update every 5 episodes (more frequent training)
+const TRAINING_UPDATE_FREQUENCY = 3;  // Update every 3 episodes (more frequent training for faster learning)
 
 // Reward tracking for asteroid mining chain
 let asteroidsDestroyedThisStep = 0;
@@ -3729,13 +3729,16 @@ class PPOAgent {
     constructor(obsDim, actionDim, lr = 3e-4, gamma = 0.99, epsClip = 0.2) {
         this.obsDim = obsDim;
         this.actionDim = actionDim;
-        this.lr = lr;
+        this.initialLr = lr;
+        this.currentLr = lr;
+        this.lrDecay = 0.9995;  // Exponential decay factor
+        this.minLr = 1e-5;  // Minimum learning rate
         this.gamma = gamma;
         this.epsClip = epsClip;
         
         // Create policy network
         this.policyNet = this.createPolicyNetwork();
-        this.optimizer = tf.train.adam(lr);
+        this.optimizer = tf.train.adam(this.currentLr);
         
         // Experience buffer
         this.buffer = {
@@ -3747,7 +3750,7 @@ class PPOAgent {
             dones: []
         };
         
-        this.maxBufferSize = 2048;
+        this.maxBufferSize = 4096;  // Larger buffer for better sample diversity
     }
     
     createPolicyNetwork() {
@@ -3755,14 +3758,14 @@ class PPOAgent {
         const input = tf.input({shape: [this.obsDim]});
         
         let x = tf.layers.dense({
-            units: 128,
+            units: 256,  // Larger network for better learning
             activation: 'relu',
             kernelInitializer: 'glorotUniform'
         }).apply(input);
         x = tf.layers.layerNormalization().apply(x);
         
         x = tf.layers.dense({
-            units: 128,
+            units: 256,  // Larger network for better learning
             activation: 'relu',
             kernelInitializer: 'glorotUniform'
         }).apply(x);
@@ -4320,7 +4323,7 @@ class PPOAgent {
         }
     }
     
-    async update(epochs = 4) {
+    async update(epochs = 10) {  // More epochs for better learning
         if (this.buffer.observations.length < 32) {
             return { policyLoss: 0, valueLoss: 0, entropy: 0 };
         }
@@ -4338,8 +4341,9 @@ class PPOAgent {
         const obsTensor = tf.tensor2d(this.buffer.observations);
         const actionTensor = tf.tensor1d(this.buffer.actions, 'int32');
         const returnTensor = tf.tensor1d(returns);
-        const advantageTensor = tf.tensor1d(normalizedAdvantages);
+        const advantageTensor = tf.tensor1d(clippedAdvantages);  // Use clipped advantages
         const oldLogProbTensor = tf.tensor1d(this.buffer.logProbs);
+        const oldValueTensor = tf.tensor1d(this.buffer.values);  // Store old values for clipping
         
         let totalPolicyLoss = 0;
         let totalValueLoss = 0;
@@ -4391,7 +4395,17 @@ class PPOAgent {
             policyLoss.dispose();
             valueLoss.dispose();
             totalLoss.dispose();
+            if (epoch === epochs - 1) {
+                // Cleanup value clipping tensors on last epoch
+                valueLoss1.dispose();
+                valuePredClipped.dispose();
+                valueLoss2.dispose();
+            }
         }
+        
+        // Update learning rate (exponential decay)
+        this.currentLr = Math.max(this.minLr, this.currentLr * this.lrDecay);
+        this.optimizer = tf.train.adam(this.currentLr);
         
         // Cleanup
         obsTensor.dispose();
@@ -4399,6 +4413,7 @@ class PPOAgent {
         returnTensor.dispose();
         advantageTensor.dispose();
         oldLogProbTensor.dispose();
+        oldValueTensor.dispose();
         
         // Clear buffer
         this.buffer = {

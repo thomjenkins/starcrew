@@ -31,17 +31,17 @@ class PolicyNetwork(nn.Module):
     
     def __init__(self, obs_dim: int, action_dim: int):
         super().__init__()
-        # Shared layers (matches game.js: 128 -> LayerNorm -> 128 -> LayerNorm)
+        # Shared layers (matches game.js: 256 -> LayerNorm -> 256 -> LayerNorm)
         self.shared = nn.Sequential(
-            nn.Linear(obs_dim, 128),
+            nn.Linear(obs_dim, 256),
             nn.ReLU(),
-            nn.LayerNorm(128),
-            nn.Linear(128, 128),
+            nn.LayerNorm(256),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.LayerNorm(128)
+            nn.LayerNorm(256)
         )
-        self.policy_head = nn.Linear(128, action_dim)
-        self.value_head = nn.Linear(128, 1)
+        self.policy_head = nn.Linear(256, action_dim)
+        self.value_head = nn.Linear(256, 1)
     
     def forward(self, x):
         shared = self.shared(x)
@@ -215,7 +215,7 @@ def generate_synthetic_observation():
     
     return obs
 
-def pretrain_agent(num_samples=20000, epochs=100, batch_size=64, output_file='pretrained_model.json'):
+def pretrain_agent(num_samples=50000, epochs=200, batch_size=128, output_file='pretrained_model.json'):
     """Pre-train agent using heuristic policy with extensive training."""
     print(f"Pre-training agent with {num_samples} samples over {epochs} epochs...")
     print("This will create a model that starts with decent performance.")
