@@ -312,9 +312,13 @@ let previousRemoteAllies = new Map(); // Track previous ally states to detect de
 let remotePlayerWeapons = new Map(); // Track remote player weapon states: {playerId: {primary: {cooldown, ammo}, ...}}
 
 // Input queue for deterministic lockstep
-let inputQueue = []; // [{tick, playerId, input, timestamp}, ...]
+let inputQueue = []; // [{tick, playerId, keys, mouseX, mouseY, timestamp}, ...]
 let lastProcessedTick = -1;
 let inputBufferSize = 3; // Process inputs 3 ticks ahead for lag compensation
+let pendingLocalInput = null; // Store local input before adding to queue
+let expectedPlayers = new Set(); // Track which players we expect inputs from
+let inputWaitTimeout = 0; // Timeout counter for waiting on inputs
+const MAX_INPUT_WAIT_TICKS = 5; // Max ticks to wait for inputs before proceeding
 
 // Firebase configuration
 const firebaseConfig = {
@@ -1088,13 +1092,133 @@ function drawGameTitle() {
     ctx.restore();
 }
 
+// Apply input to a player object (for deterministic lockstep)
+function applyInputToPlayer(playerObj, input, isLocalPlayer = false) {
+    if (!input || !input.keys) return;
+    
+    const keys = input.keys;
+    const effectiveSpeed = playerObj.speed * (1 + (crewAllocation.navigation.length * crewEffects.navigation.speedBonus));
+    
+    // Rotation
+    if (keys.a) {
+        playerObj.rotation -= playerObj.rotationSpeed;
+    }
+    if (keys.d) {
+        playerObj.rotation += playerObj.rotationSpeed;
+    }
+    
+    // Movement - WASD (rotation-based)
+    if (keys.w) {
+        playerObj.x += Math.sin(playerObj.rotation) * effectiveSpeed;
+        playerObj.y -= Math.cos(playerObj.rotation) * effectiveSpeed;
+    }
+    if (keys.s) {
+        playerObj.x -= Math.sin(playerObj.rotation) * effectiveSpeed;
+        playerObj.y += Math.cos(playerObj.rotation) * effectiveSpeed;
+    }
+    
+    // Movement - Arrow keys (directional)
+    if (keys.arrowUp) playerObj.y = Math.max(playerObj.height / 2, playerObj.y - effectiveSpeed);
+    if (keys.arrowDown) playerObj.y = Math.min(getCanvasHeight() - playerObj.height / 2, playerObj.y + effectiveSpeed);
+    if (keys.arrowLeft) playerObj.x = Math.max(playerObj.width / 2, playerObj.x - effectiveSpeed);
+    if (keys.arrowRight) playerObj.x = Math.min(getCanvasWidth() - playerObj.width / 2, playerObj.x + effectiveSpeed);
+    
+    // Mouse movement (if provided and valid)
+    if (isLocalPlayer && input.mouseX !== null && input.mouseY !== null && 
+        input.mouseX >= 0 && input.mouseY >= 0 && 
+        input.mouseX <= getCanvasWidth() && input.mouseY <= getCanvasHeight()) {
+        const dx = input.mouseX - playerObj.x;
+        const dy = input.mouseY - playerObj.y;
+        const distance = Math.hypot(dx, dy);
+        
+        if (distance > 2) {
+            const moveDistance = Math.min(distance, effectiveSpeed * 2);
+            playerObj.x += (dx / distance) * moveDistance;
+            playerObj.y += (dy / distance) * moveDistance;
+            
+            // Rotate toward movement direction
+            if (!keys.mouseButton) {
+                const targetAngle = Math.atan2(dx, -dy);
+                let angleDiff = targetAngle - playerObj.rotation;
+                while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+                
+                const maxRotationPerFrame = playerObj.rotationSpeed * 2;
+                if (Math.abs(angleDiff) > maxRotationPerFrame) {
+                    playerObj.rotation += Math.sign(angleDiff) * maxRotationPerFrame;
+                } else {
+                    playerObj.rotation = targetAngle;
+                }
+            }
+        }
+    }
+    
+    // Keep within bounds
+    playerObj.x = Math.max(playerObj.width / 2, Math.min(getCanvasWidth() - playerObj.width / 2, playerObj.x));
+    playerObj.y = Math.max(playerObj.height / 2, Math.min(getCanvasHeight() - playerObj.height / 2, playerObj.y));
+}
+
 // Player movement
-function updatePlayer() {
+function updatePlayer(inputOverride = null) {
     if (!canvas || !player) return;
     
     // Allow autopilot to run even when paused (for upgrade selection)
     // But skip normal player input when paused
     if (gameState.paused && !autopilotEnabled) return;
+    
+    // In multiplayer lockstep mode, use input from queue if provided
+    if (multiplayerMode && gameSeed !== null && inputOverride) {
+        // Apply deterministic input
+        applyInputToPlayer(player, inputOverride, true);
+        
+        // Still handle shooting and other effects
+        if (inputOverride.keys) {
+            const keys = inputOverride.keys;
+            
+            // Shooting
+            if ((keys.space || keys.mouseButton) && weapons.primary.cooldown === 0) {
+                shoot('primary');
+            }
+            if (keys.key1 && weapons.missile.cooldown === 0 && weapons.missile.ammo > 0) {
+                shoot('missile');
+            }
+            if (keys.key2 && weapons.laser.cooldown === 0 && weapons.laser.ammo > 0) {
+                shoot('laser');
+            }
+            if (keys.key3 && weapons.cluster.cooldown === 0 && weapons.cluster.ammo > 0) {
+                shoot('cluster');
+            }
+        }
+        
+        // Apply crew effects (health regen, shields, etc.)
+        if (crewAllocation.engineering.length > 0) {
+            const healthRegen = crewAllocation.engineering.length * crewEffects.engineering.healthRegen;
+            player.health = Math.min(player.maxHealth, player.health + healthRegen * 0.1);
+        }
+        
+        if (crewAllocation.shields.length > 0) {
+            const shieldRegenBonus = 1 + (crewAllocation.shields.length * crewEffects.shields.regenMultiplier);
+            if (player.shields < player.maxShields) {
+                player.shields = Math.min(player.maxShields, player.shields + player.shieldRegen * shieldRegenBonus);
+            }
+        } else {
+            if (player.shields < player.maxShields) {
+                player.shields = Math.min(player.maxShields, player.shields + player.shieldRegen);
+            }
+        }
+        
+        // Weapon cooldowns
+        const weaponsCrewCount = crewAllocation.weapons.length;
+        const cooldownMultiplier = Math.max(0.1, 1 - (weaponsCrewCount * crewEffects.weapons.cooldownReduction));
+        Object.keys(weapons).forEach(weapon => {
+            if (weapons[weapon].cooldown > 0) {
+                const decreaseAmount = 1 / cooldownMultiplier;
+                weapons[weapon].cooldown = Math.max(0, weapons[weapon].cooldown - decreaseAmount);
+            }
+        });
+        
+        return; // Skip normal input processing in lockstep mode
+    }
     
     // Ensure player position is valid
     if (isNaN(player.x)) player.x = getCanvasWidth() / 2;
@@ -1282,10 +1406,11 @@ function updatePlayer() {
         shoot('cluster');
     }
     
-    // Send player input for deterministic lockstep
+    // Store and send player input for deterministic lockstep
     if (multiplayerMode && networkManager && networkManager.isConnected()) {
-        networkManager.sendInput({
+        const localInput = {
             tick: gameTick,
+            playerId: networkManager.getPlayerId(),
             keys: {
                 space: keys[' '] || false,
                 key1: keys['1'] || false,
@@ -1302,7 +1427,25 @@ function updatePlayer() {
                 arrowRight: keys['ArrowRight'] || false
             },
             mouseX: mouseActive ? mouseX : null,
-            mouseY: mouseActive ? mouseY : null
+            mouseY: mouseActive ? mouseY : null,
+            timestamp: Date.now()
+        };
+        
+        // Add local input to queue for deterministic processing
+        const existingIndex = inputQueue.findIndex(i => i.tick === gameTick && i.playerId === localInput.playerId);
+        if (existingIndex >= 0) {
+            inputQueue[existingIndex] = localInput;
+        } else {
+            inputQueue.push(localInput);
+            inputQueue.sort((a, b) => a.tick - b.tick || a.playerId.localeCompare(b.playerId));
+        }
+        
+        // Also send over network
+        networkManager.sendInput({
+            tick: localInput.tick,
+            keys: localInput.keys,
+            mouseX: localInput.mouseX,
+            mouseY: localInput.mouseY
         });
     }
     
@@ -9627,24 +9770,63 @@ function updateGameStep() {
 
     // Process inputs from queue for this tick (deterministic lockstep)
     // In lockstep, both players process all inputs in the same order
-    if (multiplayerMode && networkManager) {
+    let localPlayerInput = null;
+    let remotePlayerInputs = [];
+    
+    if (multiplayerMode && networkManager && gameSeed !== null) {
         const currentTick = gameTick;
         const inputsForTick = inputQueue.filter(i => i.tick === currentTick);
         
         // Sort inputs by playerId for deterministic order
         inputsForTick.sort((a, b) => a.playerId.localeCompare(b.playerId));
         
-        // Process all inputs for this tick (both local and remote)
-        // Note: Local player input is already captured in updatePlayer() via keys
-        // Remote player inputs are stored for potential future use
-        // For now, we still sync player positions separately for rendering
+        // Separate local and remote inputs
+        const localPlayerId = networkManager.getPlayerId();
+        localPlayerInput = inputsForTick.find(i => i.playerId === localPlayerId);
+        remotePlayerInputs = inputsForTick.filter(i => i.playerId !== localPlayerId);
+        
+        // If we don't have local input yet, wait a bit (but not forever)
+        if (!localPlayerInput) {
+            inputWaitTimeout++;
+            if (inputWaitTimeout < MAX_INPUT_WAIT_TICKS) {
+                // Skip this tick, wait for input
+                // Check if input exists for future ticks (late input)
+                const futureInput = inputQueue.find(i => i.tick > currentTick && i.playerId === localPlayerId);
+                if (futureInput) {
+                    // Input arrived late - use it anyway to prevent desync
+                    localPlayerInput = futureInput;
+                    inputWaitTimeout = 0;
+                    console.log(`[LOCKSTEP] Using late input for tick ${currentTick} (arrived at tick ${futureInput.tick})`);
+                } else {
+                    return; // Still waiting for input
+                }
+            } else {
+                // Timeout: create empty input to prevent stalling
+                console.warn(`[LOCKSTEP] Timeout waiting for input at tick ${currentTick}, using empty input`);
+                localPlayerInput = {
+                    tick: currentTick,
+                    playerId: localPlayerId,
+                    keys: {
+                        space: false, key1: false, key2: false, key3: false,
+                        mouseButton: false, w: false, a: false, s: false, d: false,
+                        arrowUp: false, arrowDown: false, arrowLeft: false, arrowRight: false
+                    },
+                    mouseX: null,
+                    mouseY: null
+                };
+                inputWaitTimeout = 0;
+            }
+        } else {
+            inputWaitTimeout = 0; // Reset timeout on successful input
+        }
         
         // Remove processed inputs (keep last 10 ticks for safety)
         inputQueue = inputQueue.filter(i => i.tick > currentTick - 10);
     }
     
     // Both players run full game loop (deterministic)
-    updatePlayer();
+    // In lockstep mode, use input from queue; otherwise use normal input
+    updatePlayer(localPlayerInput);
     updateTractorBeam();
     updateBullets();
     updateEnemies();
@@ -10047,6 +10229,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Set up multiplayer event listeners
     networkManager.on('playersUpdated', (data) => {
         updatePlayerCountUI();
+        
+        // Track expected players for input buffering
+        if (data.players && Array.isArray(data.players)) {
+            expectedPlayers.clear();
+            data.players.forEach(p => {
+                if (p.id && p.id !== networkManager.getPlayerId()) {
+                    expectedPlayers.add(p.id);
+                }
+            });
+        }
     });
     
     networkManager.on('playerUpdated', (data) => {
