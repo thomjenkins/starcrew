@@ -239,9 +239,9 @@ def pretrain_agent(num_samples=50000, epochs=200, batch_size=128, output_file='p
         if (i + 1) % 5000 == 0:
             print(f"  Generated {i + 1}/{num_samples} samples")
     
-    # Convert to tensors
-    obs_tensor = torch.FloatTensor(observations)
-    action_tensor = torch.LongTensor(actions)
+    # Convert to tensors (convert list to numpy array first for better performance)
+    obs_tensor = torch.FloatTensor(np.array(observations))
+    action_tensor = torch.LongTensor(np.array(actions))
     
     # Training loop
     print("Training...")
