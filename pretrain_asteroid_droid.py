@@ -215,16 +215,118 @@ def generate_synthetic_observation():
     
     return obs
 
-def pretrain_agent(num_samples=200000, epochs=1000, batch_size=256, output_file='pretrained_model.json'):
-    """Pre-train agent using heuristic policy with extensive training."""
+def load_model_from_json(json_file):
+    """Load model weights from JSON file (for resuming training)."""
+    try:
+        with open(json_file, 'r') as f:
+            data = json.load(f)
+        
+        if 'weights' not in data:
+            print(f"⚠️  No weights found in {json_file}")
+            return None, None
+        
+        print(f"✅ Loading model from {json_file}")
+        print(f"   Previous obs_dim: {data.get('obs_dim', 'unknown')}")
+        print(f"   Previous action_dim: {data.get('action_dim', 'unknown')}")
+        print(f"   Previous episode: {data.get('episode', 0)}")
+        print(f"   Previous bestScore: {data.get('bestScore', 0)}")
+        
+        # Reconstruct weights from JSON
+        weights_data = data['weights']
+        state_dict = {}
+        
+        # Map JSON weights back to PyTorch state dict format
+        # Order: dense1 (weight, bias), layernorm1 (weight, bias), dense2 (weight, bias), layernorm2 (weight, bias), policy_head (weight, bias), value_head (weight, bias)
+        idx = 0
+        
+        # Dense layer 1
+        state_dict['shared.0.weight'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        state_dict['shared.0.bias'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        
+        # LayerNorm 1
+        state_dict['shared.2.weight'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        state_dict['shared.2.bias'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        
+        # Dense layer 2
+        state_dict['shared.3.weight'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        state_dict['shared.3.bias'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        
+        # LayerNorm 2
+        state_dict['shared.5.weight'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        state_dict['shared.5.bias'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        
+        # Policy head
+        state_dict['policy_head.weight'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        state_dict['policy_head.bias'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        
+        # Value head
+        state_dict['value_head.weight'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        idx += 1
+        state_dict['value_head.bias'] = torch.FloatTensor(np.array(weights_data[idx]['data']).reshape(weights_data[idx]['shape']))
+        
+        return state_dict, data
+    except Exception as e:
+        print(f"⚠️  Failed to load model from {json_file}: {e}")
+        return None, None
+
+
+def pretrain_agent(num_samples=200000, epochs=1000, batch_size=256, output_file='pretrained_model.json', resume_from=None):
+    """Pre-train agent using heuristic policy with extensive training.
+    
+    Args:
+        num_samples: Number of training samples to generate
+        epochs: Number of training epochs
+        batch_size: Batch size for training
+        output_file: Output JSON file path
+        resume_from: Path to existing model JSON to continue training from
+    """
+    if resume_from:
+        print(f"🔄 Resuming training from {resume_from}")
+    else:
+        print(f"🆕 Starting fresh training")
+    
     print(f"Pre-training agent with {num_samples} samples over {epochs} epochs...")
-    print("This will create a model that starts with decent performance.")
     print("⚠️  This will take significantly longer - be patient!")
     
     # Create model
     model = PolicyNetwork(OBS_DIM, NUM_ACTIONS)
+    
+    # Load existing model if resuming
+    start_epoch = 0
+    previous_best_loss = float('inf')
+    previous_metadata = {}
+    
+    if resume_from and os.path.exists(resume_from):
+        state_dict, metadata = load_model_from_json(resume_from)
+        if state_dict:
+            try:
+                model.load_state_dict(state_dict)
+                print("✅ Successfully loaded model weights")
+                previous_metadata = metadata
+                # Try to get previous training info if stored
+                if 'training_epochs' in metadata:
+                    start_epoch = metadata['training_epochs']
+                    print(f"   Resuming from epoch {start_epoch}")
+                if 'best_loss' in metadata:
+                    previous_best_loss = metadata['best_loss']
+                    print(f"   Previous best loss: {previous_best_loss:.4f}")
+            except Exception as e:
+                print(f"⚠️  Could not load weights (shape mismatch?): {e}")
+                print("   Starting with random weights instead")
+    
     # Use learning rate scheduling for better convergence
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    initial_lr = 0.001 if start_epoch == 0 else 0.0005  # Lower LR when resuming
+    optimizer = optim.Adam(model.parameters(), lr=initial_lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=50, verbose=True)
     criterion = nn.CrossEntropyLoss()
     
@@ -248,9 +350,9 @@ def pretrain_agent(num_samples=200000, epochs=1000, batch_size=256, output_file=
     
     # Training loop with learning rate scheduling
     print("Training...")
-    best_loss = float('inf')
+    best_loss = previous_best_loss
     patience_counter = 0
-    for epoch in range(epochs):
+    for epoch in range(start_epoch, start_epoch + epochs):
         model.train()
         total_loss = 0
         num_batches = 0
@@ -379,14 +481,17 @@ def pretrain_agent(num_samples=200000, epochs=1000, batch_size=256, output_file=
         'data': state_dict['value_head.bias'].cpu().numpy().flatten().tolist()
     })
     
-    # Save to JSON
+    # Save to JSON (preserve previous metadata if resuming)
     output = {
         'weights': weights_data,
         'obs_dim': OBS_DIM,
         'action_dim': NUM_ACTIONS,
-        'episode': 0,
-        'bestScore': 0,
-        'pretrained': True
+        'episode': previous_metadata.get('episode', 0),
+        'bestScore': previous_metadata.get('bestScore', 0),
+        'pretrained': True,
+        'training_epochs': start_epoch + epochs,  # Track total epochs trained
+        'best_loss': best_loss,  # Track best loss achieved
+        'resumed_from': resume_from if resume_from else None
     }
     
     with open(output_file, 'w') as f:
@@ -420,8 +525,9 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=1000, help='Number of training epochs (default: 1000)')
     parser.add_argument('--batch_size', type=int, default=256, help='Batch size (default: 256)')
     parser.add_argument('--output', type=str, default='pretrained_model.json', help='Output file (default: pretrained_model.json)')
+    parser.add_argument('--resume_from', type=str, default=None, help='Path to existing model JSON to continue training from')
     args = parser.parse_args()
     
-    pretrain_agent(args.samples, args.epochs, batch_size=args.batch_size, output_file=args.output)
+    pretrain_agent(args.samples, args.epochs, batch_size=args.batch_size, output_file=args.output, resume_from=args.resume_from)
 
 
