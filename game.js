@@ -8080,7 +8080,8 @@ function startMission1() {
     // Initialize mission state
     gameState.mission1Active = true;
     gameState.mission1Kills = 0;
-    gameState.mission1StartTime = Date.now();
+    gameState.mission1StartTime = Date.now(); // Set start time immediately
+    gameState.mission1TimeLimit = 180000; // 3 minutes in milliseconds - ensure it's set
     
     // Spawn 7 enemies around cargo ship
     spawnMission1Enemies();
@@ -8088,7 +8089,7 @@ function startMission1() {
     // Resume game
     gameState.paused = false;
     
-    // Show mission UI
+    // Show mission UI (this will call updateMission1UI which needs startTime)
     showMission1UI();
 }
 
@@ -8148,9 +8149,14 @@ function spawnMission1Enemies() {
 function updateMission1() {
     if (!gameState.mission1Active) return;
     
-    // Ensure startTime is set (fix NaN issue)
-    if (!gameState.mission1StartTime) {
+    // Ensure startTime is set and valid (fix NaN issue)
+    if (!gameState.mission1StartTime || isNaN(gameState.mission1StartTime)) {
         gameState.mission1StartTime = Date.now();
+    }
+    
+    // Ensure timeLimit is set (3 minutes = 180000ms)
+    if (!gameState.mission1TimeLimit || isNaN(gameState.mission1TimeLimit)) {
+        gameState.mission1TimeLimit = 180000; // 3 minutes in milliseconds
     }
     
     const elapsed = Date.now() - gameState.mission1StartTime;
@@ -8170,19 +8176,29 @@ function completeMission1() {
     // Update UI one final time to show 5/5 before deactivating
     const missionUI = document.getElementById('mission1UI');
     if (missionUI) {
-        // Ensure startTime is set for timer calculation
-        if (!gameState.mission1StartTime) {
+        // Ensure startTime is set and valid for timer calculation
+        if (!gameState.mission1StartTime || isNaN(gameState.mission1StartTime)) {
             gameState.mission1StartTime = Date.now();
         }
+        
+        // Ensure timeLimit is set
+        if (!gameState.mission1TimeLimit || isNaN(gameState.mission1TimeLimit)) {
+            gameState.mission1TimeLimit = 180000; // 3 minutes in milliseconds
+        }
+        
         const elapsed = Date.now() - gameState.mission1StartTime;
         const remaining = Math.max(0, gameState.mission1TimeLimit - elapsed);
         const minutes = Math.floor(remaining / 60000);
         const seconds = Math.floor((remaining % 60000) / 1000);
         
+        // Ensure we have valid numbers (defensive check)
+        const displayMinutes = isNaN(minutes) ? 3 : minutes;
+        const displaySeconds = isNaN(seconds) ? 0 : seconds;
+        
         missionUI.innerHTML = `
             <div style="font-weight: bold; margin-bottom: 5px;">MISSION: ELIMINATE ALIEN THREAT</div>
             <div>Kills: ${gameState.mission1Kills}/5</div>
-            <div>Time: ${minutes}:${seconds.toString().padStart(2, '0')}</div>
+            <div>Time: ${displayMinutes}:${displaySeconds.toString().padStart(2, '0')}</div>
         `;
     }
     
@@ -8242,20 +8258,33 @@ function updateMission1UI() {
     const missionUI = document.getElementById('mission1UI');
     if (!missionUI || !gameState.mission1Active) return;
     
-    // Ensure startTime is set (fix NaN issue)
-    if (!gameState.mission1StartTime) {
+    // Ensure startTime is set and valid (fix NaN issue)
+    if (!gameState.mission1StartTime || isNaN(gameState.mission1StartTime)) {
         gameState.mission1StartTime = Date.now();
     }
     
-    const elapsed = Date.now() - gameState.mission1StartTime;
+    // Ensure timeLimit is set (3 minutes = 180000ms)
+    if (!gameState.mission1TimeLimit || isNaN(gameState.mission1TimeLimit)) {
+        gameState.mission1TimeLimit = 180000; // 3 minutes in milliseconds
+    }
+    
+    // Calculate remaining time
+    const now = Date.now();
+    const elapsed = now - gameState.mission1StartTime;
     const remaining = Math.max(0, gameState.mission1TimeLimit - elapsed);
+    
+    // Calculate minutes and seconds
     const minutes = Math.floor(remaining / 60000);
     const seconds = Math.floor((remaining % 60000) / 1000);
+    
+    // Ensure we have valid numbers (defensive check)
+    const displayMinutes = isNaN(minutes) ? 3 : minutes;
+    const displaySeconds = isNaN(seconds) ? 0 : seconds;
     
     missionUI.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 5px;">MISSION: ELIMINATE ALIEN THREAT</div>
         <div>Kills: ${gameState.mission1Kills || 0}/5</div>
-        <div>Time: ${minutes}:${seconds.toString().padStart(2, '0')}</div>
+        <div>Time: ${displayMinutes}:${displaySeconds.toString().padStart(2, '0')}</div>
     `;
 }
 
