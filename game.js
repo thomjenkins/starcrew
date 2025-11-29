@@ -7683,15 +7683,119 @@ function checkMission1Trigger() {
     // Check if score reached 350 and video hasn't been shown
     if (gameState.score >= 350 && !gameState.mission1VideoShown && !gameState.mission1Active && !gameState.mission1Completed) {
         gameState.mission1VideoShown = true;
-        playMission1Video();
+        showInboundTransmissionAlert();
     }
 }
 
-function playMission1Video() {
+// Show "inbound transmission" alert that player must click
+function showInboundTransmissionAlert() {
     // Pause the game
     gameState.paused = true;
     
-    // Create video overlay (non-clickable, non-skippable)
+    // Create alert overlay
+    const alertOverlay = document.createElement('div');
+    alertOverlay.id = 'mission1Alert';
+    alertOverlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.85);
+        z-index: 10000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        pointer-events: auto;
+    `;
+    
+    // Create alert box
+    const alertBox = document.createElement('div');
+    alertBox.style.cssText = `
+        background: rgba(0, 0, 0, 0.95);
+        border: 3px solid #ffaa00;
+        border-radius: 15px;
+        padding: 40px;
+        text-align: center;
+        max-width: 90%;
+        box-shadow: 0 0 40px rgba(255, 170, 0, 0.5);
+        animation: pulse 2s ease-in-out infinite;
+    `;
+    
+    // Add pulse animation
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes pulse {
+            0%, 100% {
+                box-shadow: 0 0 40px rgba(255, 170, 0, 0.5);
+                transform: scale(1);
+            }
+            50% {
+                box-shadow: 0 0 60px rgba(255, 170, 0, 0.8);
+                transform: scale(1.02);
+            }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    // Alert content
+    alertBox.innerHTML = `
+        <div style="
+            font-size: 32px;
+            color: #ffaa00;
+            margin-bottom: 20px;
+            text-shadow: 0 0 20px rgba(255, 170, 0, 0.8);
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+        ">⚠️ INBOUND TRANSMISSION ⚠️</div>
+        <div style="
+            font-size: 18px;
+            color: #fff;
+            margin-bottom: 30px;
+            font-family: 'Courier New', monospace;
+        ">Priority message received from command</div>
+        <button id="playTransmissionBtn" style="
+            background: linear-gradient(135deg, #ffaa00, #ff8800);
+            border: 2px solid #ffaa00;
+            color: #000;
+            padding: 15px 40px;
+            font-size: 20px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            text-transform: uppercase;
+            transition: all 0.3s;
+            box-shadow: 0 0 20px rgba(255, 170, 0, 0.5);
+        ">PLAY TRANSMISSION</button>
+    `;
+    
+    // Button hover effect
+    const playBtn = alertBox.querySelector('#playTransmissionBtn');
+    playBtn.addEventListener('mouseenter', () => {
+        playBtn.style.background = 'linear-gradient(135deg, #ffcc00, #ffaa00)';
+        playBtn.style.boxShadow = '0 0 30px rgba(255, 170, 0, 0.8)';
+        playBtn.style.transform = 'scale(1.05)';
+    });
+    playBtn.addEventListener('mouseleave', () => {
+        playBtn.style.background = 'linear-gradient(135deg, #ffaa00, #ff8800)';
+        playBtn.style.boxShadow = '0 0 20px rgba(255, 170, 0, 0.5)';
+        playBtn.style.transform = 'scale(1)';
+    });
+    
+    // Click handler - play video
+    playBtn.addEventListener('click', () => {
+        alertOverlay.remove();
+        playMission1Video();
+    });
+    
+    alertOverlay.appendChild(alertBox);
+    document.body.appendChild(alertOverlay);
+}
+
+function playMission1Video() {
+    // Game is already paused from the alert
+    // Create video overlay
     mission1VideoOverlay = document.createElement('div');
     mission1VideoOverlay.style.cssText = `
         position: fixed;
@@ -7723,18 +7827,12 @@ function playMission1Video() {
     mission1VideoElement.style.cssText = `
         max-width: 90%;
         max-height: 90%;
-        pointer-events: none;
+        pointer-events: auto;
     `;
-    mission1VideoElement.controls = false;
+    mission1VideoElement.controls = true;  // Allow controls for mobile
     mission1VideoElement.playsInline = true; // Important for mobile
     mission1VideoElement.muted = false;
     mission1VideoElement.preload = 'auto';
-    
-    // Prevent video from being skipped
-    mission1VideoElement.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-    });
     
     let videoPlayed = false;
     let errorHandled = false;
