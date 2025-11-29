@@ -4638,13 +4638,25 @@ function softmaxSingle(logits, idx) {
 // Load pre-trained model from JSON file (deployed with game)
 async function loadPretrainedModel() {
     try {
-        const response = await fetch('pretrained_model.json');
+        // Add cache busting to ensure we get the latest model
+        const cacheBuster = `?v=${Date.now()}`;
+        const response = await fetch('pretrained_model.json' + cacheBuster, {
+            cache: 'no-store' // Force no caching
+        });
         if (!response.ok) {
             console.warn('Pre-trained model file not found');
             return null;
         }
         const data = await response.json();
-        console.log('✅ Pre-trained model loaded from file');
+        
+        // Log model metadata to verify which version loaded
+        const trainingEpochs = data.training_epochs || 'unknown';
+        const bestLoss = data.best_loss || 'unknown';
+        console.log(`✅ Pre-trained model loaded from file`);
+        console.log(`   Training epochs: ${trainingEpochs}`);
+        console.log(`   Best loss: ${bestLoss}`);
+        console.log(`   Weights: ${data.weights ? data.weights.length : 0} layers`);
+        
         return data;
     } catch (error) {
         console.warn('Could not load pre-trained model:', error);
